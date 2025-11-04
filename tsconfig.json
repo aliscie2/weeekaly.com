@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "target": "es2021",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "module": "esnext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/frontend/*"],
+      "$/*": ["src/*"],
+    },
+    "types": [
+      "node",
+      "react",
+      "react-dom",
+      "vite/client"
+    ]
+  },
+  "include": ["**/*.ts","src", "./types/**/*", "vite-env.d.ts", "vite-env.d.ts", "tests"],
+	"exclude": ["node_modules", "dist", "playwright.config.ts", "vitest.config.ts"]
+}

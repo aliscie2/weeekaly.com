@@ -1,0 +1,44 @@
+{
+  "declarations": {
+    "output": "src/declarations",
+    "capabilities": ["nodejs"]
+  },
+  "canisters": {
+    "internet_identity": {
+      "type": "custom",
+      "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
+      "wasm": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity_dev.wasm.gz",
+      "remote": {
+        "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
+        "id": {
+          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai",
+          "staging": "rdmx6-jaaaa-aaaaa-aaadq-cai",
+          "integration": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+        }
+      },
+      "specified_id": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+    },
+    "backend": {
+      "type": "rust",
+      "package": "backend",
+      "candid": "src/backend/backend.did"
+    },
+    "frontend": {
+      "dependencies": ["backend"],
+      "frontend": {
+        "entrypoint": "src/frontend/index.html"
+      },
+      "source": ["build", "src/frontend"],
+      "type": "assets"
+    }
+  },
+  "output_env_file": ".env",
+  "defaults": {
+    "build": {
+      "output": "canisters",
+      "packtool": ""
+    }
+  },
+  "version": 1,
+  "dfx": "0.29.2"
+}
