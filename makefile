@@ -1,58 +1,36 @@
 # Development
-run_fe:
-	npm start
-
-run_be:
-	dfx start --background --host 127.0.0.1:4943
-	dfx deploy backend
-
 start:
-	chmod +x ./scripts/start.sh
-	./scripts/start.sh
+	npm start
 
 # Process Management
 kill:
-	kill -INT $(lsof -t -i :8080)
-	kill -INT $(lsof -t -i :4943)
-
-kill_dfx:
-	killall dfx replica
-
-# Candid & Declarations
-generate_candid_file:
-	bash scripts/did.sh
-	@echo "Generating declarations..."
-	dfx generate backend
+	killall dfx replica 2>/dev/null || true
+	lsof -ti:5173 | xargs kill -9 2>/dev/null || true
 
 # Local Deployment
 deploy-all:
 	dfx killall 2>/dev/null || true
 	dfx stop 2>/dev/null || true
-	dfx start --background --clean --host 127.0.0.1:4943 
-	dfx deploy internet_identity || error "Internet Identity deployment failed"
-	sh scripts/first_time_run.sh
-	bash scripts/did.sh backend
+	dfx start --background --clean --host 127.0.0.1:4943
+	dfx deploy internet_identity
+	dfx deploy backend
 	dfx generate backend
-	sh scripts/set_env.sh
-	npm start
+	npm install && npm start
 
 redeploy:
 	dfx killall 2>/dev/null || true
 	dfx stop 2>/dev/null || true
 	rm -rf .dfx/state 2>/dev/null || true
-	dfx start --background --host 127.0.0.1:4943 
+	dfx start --background --host 127.0.0.1:4943
 	sleep 3
 	dfx deploy internet_identity
-	sh scripts/first_time_run.sh
-	bash scripts/did.sh backend
+	dfx deploy backend
 	dfx generate backend
-	sh scripts/set_env.sh
 	npm start
 
 upgrade-backend:
-	bash scripts/did.sh backend
-	dfx generate backend
 	dfx deploy backend
+	dfx generate backend
 
 # IC Mainnet Deployment
 deploy-ic:
@@ -84,6 +62,7 @@ topup_backend:
 # Code Quality
 frontend-format:
 	prettier --write ./src/frontend
+	npx tsc --noUnusedLocals --noUnusedParameters --noEmit --ski
 	npx tsc --noUnusedLocals --noUnusedParameters --noEmit --skipLibCheck
 
 pretty:
