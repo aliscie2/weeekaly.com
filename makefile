@@ -2,17 +2,35 @@
 start:
 	npm start
 
+run_fe:
+	yarn start
+
+run_be:
+	dfx start --background --host 127.0.0.1:4943
+	dfx deploy backend
+
 # Process Management
 kill:
-	killall dfx replica 2>/dev/null || true
+	kill -INT $(lsof -t -i :8080) 2>/dev/null || true
+	kill -INT $(lsof -t -i :4943) 2>/dev/null || true
 	lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+
+kill_dfx:
+	killall dfx replica 2>/dev/null || true
+
+get_all_localhost:
+	lsof -i 4 -P -n | grep '127.0.0.1'
+
+get_any_port:
+	lsof -i :4943
 
 # Local Deployment
 deploy-all:
 	dfx killall 2>/dev/null || true
 	dfx stop 2>/dev/null || true
 	dfx start --background --clean --host 127.0.0.1:4943
-	dfx deploy internet_identity
+	sleep 5
+	dfx deploy internet_identity || echo "Warning: Internet Identity deployment failed"
 	dfx deploy backend
 	dfx generate backend
 	npm install && npm start
@@ -22,15 +40,11 @@ redeploy:
 	dfx stop 2>/dev/null || true
 	rm -rf .dfx/state 2>/dev/null || true
 	dfx start --background --host 127.0.0.1:4943
-	sleep 3
+	sleep 5
 	dfx deploy internet_identity
 	dfx deploy backend
 	dfx generate backend
 	npm start
-
-upgrade-backend:
-	dfx deploy backend
-	dfx generate backend
 
 # IC Mainnet Deployment
 deploy-ic:
@@ -46,7 +60,21 @@ deploy-ic:
 get_logs:
 	dfx canister logs backend --network ic
 
-# Cycles Management (update canister IDs after first deploy)
+# Cycles Management
+add_balance:
+	dfx wallet --network ic redeem-faucet-coupon YOUR_COUPON_CODE
+	dfx ledger --network ic balance
+	dfx wallet --network ic balance
+	dfx canister --network ic balance
+
+topup_cycles:
+	dfx identity use default
+	dfx ledger account-id --network=ic
+	@echo "Send ICP to the address above, then check balance:"
+	dfx ledger balance --network=ic
+	dfx identity --network=ic get-wallet
+	@echo "Update wallet ID below and run topup_backend"
+
 topup_backend:
 	@echo "Converting ICP to cycles and topping up backend..."
 	dfx identity use default
@@ -61,9 +89,10 @@ topup_backend:
 
 # Code Quality
 frontend-format:
+	yarn run lint
 	prettier --write ./src/frontend
-	npx tsc --noUnusedLocals --noUnusedParameters --noEmit --ski
 	npx tsc --noUnusedLocals --noUnusedParameters --noEmit --skipLibCheck
+	npx ts-unused-exports tsconfig.json || true
 
 pretty:
 	prettier --write ./src/frontend
@@ -73,14 +102,20 @@ backend-format:
 	cargo fmt
 	cargo clippy --fix
 
+code_review:
+	git diff HEAD~1 HEAD -- src/frontend
+
 # Testing
 test-e2e:
 	lsof -ti:5173 | xargs kill -9 || true
 	dfx deploy backend --mode reinstall --yes
-	npm start &
+	yarn start &
 	sleep 5
-	npm run playwright
+	yarn playwright test
 	lsof -ti:5173 | xargs kill -9 || true
+
+debug-loading-time:
+	npm run start -- --debug hmr
 
 # Utilities
 generate_icons:
@@ -88,3 +123,21 @@ generate_icons:
 
 get_typescript_issues:
 	npx tsc --noEmit --pretty
+
+testing_thumbnails:
+	@echo "Starting cloudflare tunnel..."
+	@echo "Remember to add 'allowedHosts: [\".trycloudflare.com\"]' in vite.config.ts server config"
+	cloudflared tunnel --url http://localhost:5173
+
+getting_pulls:
+	@echo "Usage: make getting_pulls PR=123"
+	git fetch origin pull/$(PR)/head:pr-$(PR)
+
+
+	
+upgrade-backend:
+	bash scripts/did.sh backend
+	dfx generate backend
+	dfx deploy backend
+	gzip -fk target/wasm32-unknown-unknown/release/backend.wasm
+	mv target/wasm32-unknown-unknown/release/backend.wasm.gz ./tests/backend/

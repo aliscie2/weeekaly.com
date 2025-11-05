@@ -330,6 +330,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "base64 0.22.1",
  "candid",
  "dotenv",
  "ethers-core",
@@ -353,6 +354,7 @@ dependencies = [
  "serde_bytes",
  "serde_cbor",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
