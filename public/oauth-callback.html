@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>OAuth Callback</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background: #f5f5f5;
+    }
+    .container {
+      text-align: center;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    p {
+      color: #666;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="spinner"></div>
+    <p>Processing authentication...</p>
+  </div>
+  
+  <script>
+    window.onload = () => {
+      console.log('OAuth callback page loaded');
+      console.log('Full URL:', window.location.href);
+      
+      // Get token from URL fragment (for id_token response)
+      const paramsHash = new URLSearchParams(window.location.hash.slice(1));
+      const id_token = paramsHash.get('id_token');
+      const stateHash = paramsHash.get('state');
+      const errorHash = paramsHash.get('error');
+      
+      // Get code from query string (for code response)
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      const stateQuery = params.get('state');
+      const errorQuery = params.get('error');
+      
+      console.log('Parsed params:', { 
+        id_token: id_token ? id_token.substring(0, 20) + '...' : null,
+        code: code ? code.substring(0, 20) + '...' : null,
+        state: stateHash || stateQuery,
+        error: errorHash || errorQuery
+      });
+      
+      if (!window.opener) {
+        console.error('No opener window found');
+        document.querySelector('p').textContent = 'Error: No parent window found. Please close this window and try again.';
+        return;
+      }
+      
+      if (errorHash || errorQuery) {
+        // OAuth error
+        const error = errorHash || errorQuery;
+        console.log('OAuth error:', error);
+        window.opener.postMessage({
+          type: 'oauth_error',
+          error: error,
+        }, window.location.origin);
+        setTimeout(() => window.close(), 100);
+      } else if (id_token) {
+        // ID token flow (implicit/hybrid)
+        console.log('Sending id_token to parent window');
+        window.opener.postMessage({
+          type: 'oauth_success',
+          id_token: id_token,
+          state: stateHash,
+        }, window.location.origin);
+        setTimeout(() => window.close(), 100);
+      } else if (code) {
+        // Authorization code flow
+        console.log('Sending code to parent window');
+        window.opener.postMessage({
+          type: 'oauth_success',
+          code: code,
+          state: stateQuery,
+        }, window.location.origin);
+        setTimeout(() => window.close(), 100);
+      } else {
+        // No token or code found
+        console.error('No token or code found in URL');
+        window.opener.postMessage({
+          type: 'oauth_error',
+          error: 'No authorization token received',
+        }, window.location.origin);
+        setTimeout(() => window.close(), 100);
+      }
+    };
+  </script>
+</body>
+</html>

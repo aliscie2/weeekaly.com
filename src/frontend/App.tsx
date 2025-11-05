@@ -24,8 +24,9 @@ import { AvatarEditPage } from './components/AvatarEditPage';
 import { DeleteConfirmationPage } from './components/DeleteConfirmationPage';
 import { QuickGatheringPage } from './components/QuickGatheringPage';
 import logo from './public/logo.png';
-import { backendActor } from './utils/actor';
+import { backendActor, setAuthenticatedActor } from './utils/actor';
 import { useHelloWorld } from './hooks/useBackend';
+import { useOAuthIdentity } from './hooks/useOAuthIdentity';
 
 interface Message {
   id: string;
@@ -143,6 +144,54 @@ const getProportionalHeight = (timeSlot: TimeSlot, maxHeightPx: number): number 
 const CURRENT_USER_ID = 'current-user';
 
 export default function App() {
+  // OAuth identity hook
+  const { login: loginWithOAuth, identity, isAuthenticated } = useOAuthIdentity();
+
+  // Update backend actor when identity changes (login or restore from storage)
+  useEffect(() => {
+    if (isAuthenticated && identity) {
+      // Update the backend actor with the authenticated identity
+      setAuthenticatedActor(identity);
+      
+      // Verify authentication and log user data
+      backendActor.get_caller().then((callerPrincipal) => {
+        // Get user info from backend
+        return backendActor.get_user_info();
+      }).then((userInfo) => {
+        // Log stored user data from OAuth (localStorage)
+        const userEmail = localStorage.getItem('ic-user-email');
+        const userName = localStorage.getItem('ic-user-name');
+        const userId = localStorage.getItem('ic-user-id');
+        const userPicture = localStorage.getItem('ic-user-picture');
+        
+        console.log({
+          event: '📋 USER INFORMATION (After Login)',
+          email: {
+            localStorage: userEmail || 'Not available',
+            backend: userInfo.email || 'Not available'
+          },
+          name: {
+            localStorage: userName || 'Not available',
+            backend: userInfo.name || 'Not available'
+          },
+          userId: {
+            localStorage: userId || 'Not available',
+            backend: userInfo.user_id || 'Not available'
+          },
+          picture: userPicture || 'Not available',
+          principal: userInfo.principal,
+          calendar: {
+            events: 'Not yet implemented',
+            calendarId: 'Not yet implemented',
+            sharingId: 'Not yet implemented'
+          }
+        });
+      }).catch((error) => {
+        console.error('❌ [App] Failed to get user info:', error);
+      });
+    }
+  }, [isAuthenticated, identity]);
+  
   // Use React Query to fetch backend data - only runs once and caches the result
   const { data: backendMessage } = useHelloWorld();
   
@@ -1199,7 +1248,15 @@ Next Steps:
                   className="flex justify-center"
                 >
                   <Button
-                    onClick={() => setCurrentView('contact')}
+                    onClick={async () => {
+                      const success = await loginWithOAuth('google');
+                      if (success) {
+                        toast.success('Successfully authenticated!');
+                        setCurrentView('contact');
+                      } else {
+                        toast.error('Login failed. Please try again.');
+                      }
+                    }}
                     className="bg-[#8b8475] hover:bg-[#6b6558] text-[#f5f3ef] px-6 py-5 md:px-8 md:py-6 text-base md:text-lg rounded-xl shadow-lg hover:shadow-xl transition-all duration-300"
                   >
                     <svg className="w-4 h-4 md:w-5 md:h-5 mr-2 md:mr-3" viewBox="0 0 24 24" fill="currentColor">
