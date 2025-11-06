@@ -46,23 +46,30 @@
       console.log('OAuth callback page loaded');
       console.log('Full URL:', window.location.href);
       
-      // Get token from URL fragment (for id_token response)
+      // For hybrid flow (code id_token), Google returns BOTH in the hash fragment
       const paramsHash = new URLSearchParams(window.location.hash.slice(1));
       const id_token = paramsHash.get('id_token');
+      const code = paramsHash.get('code'); // Code is also in hash for hybrid flow
       const stateHash = paramsHash.get('state');
       const errorHash = paramsHash.get('error');
       
-      // Get code from query string (for code response)
+      // Also check query string as fallback (for pure code flow)
       const params = new URLSearchParams(window.location.search);
-      const code = params.get('code');
+      const codeQuery = params.get('code');
       const stateQuery = params.get('state');
       const errorQuery = params.get('error');
       
+      // Use code from hash if available, otherwise from query
+      const finalCode = code || codeQuery;
+      const finalState = stateHash || stateQuery;
+      const finalError = errorHash || errorQuery;
+      
       console.log('Parsed params:', { 
         id_token: id_token ? id_token.substring(0, 20) + '...' : null,
-        code: code ? code.substring(0, 20) + '...' : null,
-        state: stateHash || stateQuery,
-        error: errorHash || errorQuery
+        code: finalCode ? finalCode.substring(0, 20) + '...' : null,
+        state: finalState,
+        error: finalError,
+        source: code ? 'hash' : (codeQuery ? 'query' : 'none')
       });
       
       if (!window.opener) {
@@ -71,36 +78,34 @@
         return;
       }
       
-      if (errorHash || errorQuery) {
+      if (finalError) {
         // OAuth error
-        const error = errorHash || errorQuery;
-        console.log('OAuth error:', error);
+        console.log('OAuth error:', finalError);
         window.opener.postMessage({
           type: 'oauth_error',
-          error: error,
+          error: finalError,
         }, window.location.origin);
         setTimeout(() => window.close(), 100);
-      } else if (id_token) {
-        // ID token flow (implicit/hybrid)
-        console.log('Sending id_token to parent window');
+      } else if (id_token || finalCode) {
+        // Hybrid flow - send both id_token and code if available
+        console.log('✅ Sending tokens to parent window', {
+          hasIdToken: !!id_token,
+          hasCode: !!finalCode,
+          idTokenPreview: id_token ? id_token.substring(0, 20) + '...' : null,
+          codePreview: finalCode ? finalCode.substring(0, 20) + '...' : null
+        });
         window.opener.postMessage({
           type: 'oauth_success',
           id_token: id_token,
-          state: stateHash,
-        }, window.location.origin);
-        setTimeout(() => window.close(), 100);
-      } else if (code) {
-        // Authorization code flow
-        console.log('Sending code to parent window');
-        window.opener.postMessage({
-          type: 'oauth_success',
-          code: code,
-          state: stateQuery,
+          code: finalCode,
+          state: finalState,
         }, window.location.origin);
         setTimeout(() => window.close(), 100);
       } else {
         // No token or code found
         console.error('No token or code found in URL');
+        console.error('Hash:', window.location.hash);
+        console.error('Search:', window.location.search);
         window.opener.postMessage({
           type: 'oauth_error',
           error: 'No authorization token received',

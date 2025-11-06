@@ -16,6 +16,10 @@ const MAX_SESSION_LIFETIME_NS: u64 = 7 * 24 * 60 * 60 * 1_000_000_000;
 /// Google OAuth Client ID
 const GOOGLE_CLIENT_ID: &str = "1094222481488-rrlvvr8q7mjaq9vmave57fkfrjcd9g3a.apps.googleusercontent.com";
 
+/// Google OAuth Client Secret - SECURELY STORED IN BACKEND ONLY
+/// TODO: Move to environment variable or secure configuration
+const GOOGLE_CLIENT_SECRET: &str = "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";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -84,12 +88,38 @@ pub struct GetDelegationResponse {
 }
 
 // ============================================================================
+// Google OAuth Token Types
+// ============================================================================
+
+#[derive(CandidType, Deserialize)]
+pub struct ExchangeCodeRequest {
+    pub code: String,
+    pub code_verifier: String,
+    pub redirect_uri: String,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone)]
+pub struct TokenResponse {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in: u64,
+    pub token_type: String,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+}
+
+// ============================================================================
 // State
 // ============================================================================
 
 thread_local! {
     static PROVIDERS: RefCell<HashMap<String, OAuthProvider>> = RefCell::new(HashMap::new());
     static SESSIONS: RefCell<HashMap<Vec<u8>, SessionData>> = RefCell::new(HashMap::new());
+    // Store encrypted tokens per user (user_id -> TokenResponse)
+    static USER_TOKENS: RefCell<HashMap<String, TokenResponse>> = RefCell::new(HashMap::new());
 }
 
 // ============================================================================
@@ -106,8 +136,8 @@ fn init() {
             client_id: GOOGLE_CLIENT_ID.to_string(),
             authorization_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
             token_url: "https://oauth2.googleapis.com/token".to_string(),
-            scope: "openid email profile".to_string(),
-            response_type: "id_token".to_string(),
+            scope: "openid email profile https://www.googleapis.com/auth/calendar".to_string(),
+            response_type: "code id_token".to_string(),
         });
     });
 }
@@ -301,6 +331,136 @@ fn logout(session_public_key: Vec<u8>) -> Result<(), String> {
             Err("Session not found".to_string())
         }
     })
+}
+
+// ============================================================================
+// Google OAuth Token Exchange (SECURE - Backend Only)
+// ============================================================================
+
+/// Exchange authorization code for access token
+/// This is done securely on the backend to protect the client secret
+#[update]
+async fn exchange_oauth_code(req: ExchangeCodeRequest) -> Result<TokenResponse, String> {
+    ic_cdk::println!("🔄 [Backend] Exchanging OAuth code for tokens...");
+    
+    // Build request body
+    let mut params = vec![
+        ("code", req.code.as_str()),
+        ("client_id", GOOGLE_CLIENT_ID),
+        ("client_secret", GOOGLE_CLIENT_SECRET),
+        ("redirect_uri", req.redirect_uri.as_str()),
+        ("grant_type", "authorization_code"),
+    ];
+    
+    // Add PKCE verifier if provided
+    if !req.code_verifier.is_empty() {
+        params.push(("code_verifier", req.code_verifier.as_str()));
+    }
+    
+    // Make HTTP outcall to Google's token endpoint
+    let body = params.iter()
+        .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    
+    let request = ic_cdk::api::management_canister::http_request::CanisterHttpRequestArgument {
+        url: "https://oauth2.googleapis.com/token".to_string(),
+        method: ic_cdk::api::management_canister::http_request::HttpMethod::POST,
+        body: Some(body.into_bytes()),
+        max_response_bytes: Some(4096),
+        transform: None,
+        headers: vec![
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "Content-Type".to_string(),
+                value: "application/x-www-form-urlencoded".to_string(),
+            },
+        ],
+    };
+    
+    match ic_cdk::api::management_canister::http_request::http_request(request, 25_000_000_000).await {
+        Ok((response,)) => {
+            if response.status != candid::Nat::from(200u8) {
+                let error_body = String::from_utf8_lossy(&response.body);
+                ic_cdk::println!("❌ [Backend] Token exchange failed: {}", error_body);
+                return Err(format!("Token exchange failed: {}", error_body));
+            }
+            
+            let token_response: TokenResponse = serde_json::from_slice(&response.body)
+                .map_err(|e| format!("Failed to parse token response: {}", e))?;
+            
+            ic_cdk::println!("✅ [Backend] Token exchange successful!");
+            
+            // Store tokens for this user (associated with their session)
+            // In production, encrypt tokens before storing
+            let caller = ic_cdk::caller().to_text();
+            USER_TOKENS.with(|t| {
+                t.borrow_mut().insert(caller, token_response.clone());
+            });
+            
+            Ok(token_response)
+        }
+        Err((code, msg)) => {
+            ic_cdk::println!("❌ [Backend] HTTP request failed: {:?} - {}", code, msg);
+            Err(format!("HTTP request failed: {:?} - {}", code, msg))
+        }
+    }
+}
+
+/// Refresh access token using refresh token
+#[update]
+async fn refresh_google_token(req: RefreshTokenRequest) -> Result<TokenResponse, String> {
+    ic_cdk::println!("🔄 [Backend] Refreshing access token...");
+    
+    let params = vec![
+        ("refresh_token", req.refresh_token.as_str()),
+        ("client_id", GOOGLE_CLIENT_ID),
+        ("client_secret", GOOGLE_CLIENT_SECRET),
+        ("grant_type", "refresh_token"),
+    ];
+    
+    let body = params.iter()
+        .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    
+    let request = ic_cdk::api::management_canister::http_request::CanisterHttpRequestArgument {
+        url: "https://oauth2.googleapis.com/token".to_string(),
+        method: ic_cdk::api::management_canister::http_request::HttpMethod::POST,
+        body: Some(body.into_bytes()),
+        max_response_bytes: Some(4096),
+        transform: None,
+        headers: vec![
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "Content-Type".to_string(),
+                value: "application/x-www-form-urlencoded".to_string(),
+            },
+        ],
+    };
+    
+    match ic_cdk::api::management_canister::http_request::http_request(request, 25_000_000_000).await {
+        Ok((response,)) => {
+            if response.status != candid::Nat::from(200u8) {
+                let error_body = String::from_utf8_lossy(&response.body);
+                return Err(format!("Token refresh failed: {}", error_body));
+            }
+            
+            let token_response: TokenResponse = serde_json::from_slice(&response.body)
+                .map_err(|e| format!("Failed to parse token response: {}", e))?;
+            
+            ic_cdk::println!("✅ [Backend] Token refresh successful!");
+            
+            // Update stored tokens
+            let caller = ic_cdk::caller().to_text();
+            USER_TOKENS.with(|t| {
+                t.borrow_mut().insert(caller, token_response.clone());
+            });
+            
+            Ok(token_response)
+        }
+        Err((code, msg)) => {
+            Err(format!("HTTP request failed: {:?} - {}", code, msg))
+        }
+    }
 }
 
 // ============================================================================

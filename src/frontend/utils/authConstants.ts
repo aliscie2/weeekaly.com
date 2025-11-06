@@ -20,6 +20,9 @@ export const AUTH_CONSTANTS = {
   STORAGE_KEY_USER_NAME: 'ic-user-name',
   STORAGE_KEY_USER_ID: 'ic-user-id',
   STORAGE_KEY_USER_PICTURE: 'ic-user-picture',
+  STORAGE_KEY_ACCESS_TOKEN: 'ic-access-token',
+  STORAGE_KEY_REFRESH_TOKEN: 'ic-refresh-token',
+  STORAGE_KEY_TOKEN_EXPIRY: 'ic-token-expiry',
   
   // OAuth callback
   OAUTH_CALLBACK_PATH: '/oauth-callback.html',

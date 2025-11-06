@@ -36,6 +36,7 @@ candid = "0.10.14"
 ic-llm = "1.1.0"
 sha2 = "0.10"
 base64 = "0.22"
+urlencoding = "2.1"
 
 [dev-dependencies]
 #pocket-ic = "2.0.1"

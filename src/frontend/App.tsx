@@ -25,8 +25,9 @@ import { DeleteConfirmationPage } from './components/DeleteConfirmationPage';
 import { QuickGatheringPage } from './components/QuickGatheringPage';
 import logo from './public/logo.png';
 import { backendActor, setAuthenticatedActor } from './utils/actor';
-import { useHelloWorld } from './hooks/useBackend';
+import { useHelloWorld, useCalendarEvents } from './hooks/useBackend';
 import { useOAuthIdentity } from './hooks/useOAuthIdentity';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Message {
   id: string;
@@ -144,6 +145,9 @@ const getProportionalHeight = (timeSlot: TimeSlot, maxHeightPx: number): number 
 const CURRENT_USER_ID = 'current-user';
 
 export default function App() {
+  // React Query client for cache management
+  const queryClient = useQueryClient();
+  
   // OAuth identity hook
   const { login: loginWithOAuth, identity, isAuthenticated } = useOAuthIdentity();
 
@@ -157,7 +161,7 @@ export default function App() {
       backendActor.get_caller().then((callerPrincipal) => {
         // Get user info from backend
         return backendActor.get_user_info();
-      }).then((userInfo) => {
+      }).then(async (userInfo) => {
         // Log stored user data from OAuth (localStorage)
         const userEmail = localStorage.getItem('ic-user-email');
         const userName = localStorage.getItem('ic-user-name');
@@ -181,11 +185,12 @@ export default function App() {
           picture: userPicture || 'Not available',
           principal: userInfo.principal,
           calendar: {
-            events: 'Not yet implemented',
-            calendarId: 'Not yet implemented',
-            sharingId: 'Not yet implemented'
+            note: '📅 Calendar events will be loaded by React Query hook'
           }
         });
+        
+        // Trigger calendar events fetch via React Query (removes redundant fetch)
+        queryClient.invalidateQueries({ queryKey: ['calendar-events'] });
       }).catch((error) => {
         console.error('❌ [App] Failed to get user info:', error);
       });
@@ -195,12 +200,28 @@ export default function App() {
   // Use React Query to fetch backend data - only runs once and caches the result
   const { data: backendMessage } = useHelloWorld();
   
+  // Auto-refresh calendar events every 5 minutes (optimized from 30 seconds)
+  const { data: calendarEventsFromBackend, isLoading: isLoadingEvents } = useCalendarEvents(
+    isAuthenticated // Only poll when user is authenticated
+  );
+  
   // Log the message when it's available
   useEffect(() => {
     if (backendMessage) {
       console.log(backendMessage);
     }
   }, [backendMessage]);
+  
+  // Log when calendar events are fetched
+  useEffect(() => {
+    if (calendarEventsFromBackend) {
+      console.log('📅 [Calendar] Events updated:', {
+        timestamp: new Date().toISOString(),
+        events: calendarEventsFromBackend,
+        count: calendarEventsFromBackend.length
+      });
+    }
+  }, [calendarEventsFromBackend]);
   
   const [currentView, setCurrentView] = useState<'landing' | 'contact' | 'availability' | 'profile' | 'avatarEdit' | 'events' | 'eventDetails' | 'deleteConfirmation' | 'eventDeleteConfirmation' | 'quickGathering'>('landing');
   const [selectedAvailabilityId, setSelectedAvailabilityId] = useState<string | null>(null);

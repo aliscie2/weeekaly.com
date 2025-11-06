@@ -98,13 +98,19 @@ export async function loginWithOAuth(
       scope: provider.scope,
       state: state,
       nonce: nonce,
+      access_type: 'offline', // Request refresh token
+      prompt: 'consent', // Force consent screen to get refresh token
     };
     
-    // Only add PKCE for code flow (not for id_token implicit flow)
+    // Add PKCE for code flow
+    let codeVerifier: string | undefined;
     if (provider.response_type.includes('code')) {
-      const { challenge } = await generatePKCE();
-      params.code_challenge = challenge;
+      const pkce = await generatePKCE();
+      params.code_challenge = pkce.challenge;
       params.code_challenge_method = 'S256';
+      codeVerifier = pkce.verifier;
+      // Store verifier for token exchange
+      sessionStorage.setItem('pkce_verifier', codeVerifier);
     }
     
     authUrl.search = new URLSearchParams(params).toString();
@@ -126,7 +132,7 @@ export async function loginWithOAuth(
     }
     
     // 6. Wait for callback
-    const token = await new Promise<string>((resolve, reject) => {
+    const { id_token, code } = await new Promise<{ id_token: string; code?: string }>((resolve, reject) => {
       const messageListener = (event: MessageEvent) => {
         if (event.source === popup && event.origin === window.location.origin) {
           window.removeEventListener('message', messageListener);
@@ -136,7 +142,10 @@ export async function loginWithOAuth(
             if (event.data.state !== state) {
               reject(new Error(AUTH_ERRORS.INVALID_STATE));
             } else {
-              resolve(event.data.id_token);
+              resolve({ 
+                id_token: event.data.id_token,
+                code: event.data.code 
+              });
             }
           } else if (event.data.type === AUTH_CONSTANTS.MESSAGE_TYPE_ERROR) {
             reject(new Error(event.data.error || AUTH_ERRORS.AUTH_FAILED));
@@ -156,7 +165,7 @@ export async function loginWithOAuth(
     });
     
     // 7. Extract email and user info from JWT token
-    const jwtParts = token.split('.');
+    const jwtParts = id_token.split('.');
     if (jwtParts.length === 3) {
       try {
         const payload = JSON.parse(atob(jwtParts[1].replace(/-/g, '+').replace(/_/g, '/')));
@@ -166,6 +175,17 @@ export async function loginWithOAuth(
         localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_USER_NAME, payload.name || '');
         localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_USER_ID, payload.sub || '');
         localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_USER_PICTURE, payload.picture || '');
+        
+        // Log that we received the authorization code for Calendar API access
+        if (code) {
+          console.log('✅ [OAuth] Received authorization code for Calendar API access');
+          console.log('📝 [OAuth] Code preview:', code.substring(0, 20) + '...');
+          // Store the code temporarily - in production, exchange this for access token on backend
+          localStorage.setItem('ic-oauth-code', code);
+        } else {
+          console.warn('⚠️ [OAuth] No authorization code received - Calendar API access will not work');
+          console.log('🔍 [OAuth] Response type was:', provider.response_type);
+        }
       } catch (e) {
         console.error('❌ [OAuth] Failed to parse JWT payload:', e);
       }
@@ -174,7 +194,7 @@ export async function loginWithOAuth(
     // 8. Prepare delegation
     const prepareResult = await backendActor.prepare_delegation({
       provider: AUTH_CONSTANTS.DEFAULT_PROVIDER,
-      id_token: token,
+      id_token: id_token,
       origin: window.location.origin,
       session_public_key: Array.from(new Uint8Array(sessionPublicKey)),
       max_time_to_live: AUTH_CONSTANTS.MAX_TIME_TO_LIVE_NS,
