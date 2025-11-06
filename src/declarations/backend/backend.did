@@ -3,6 +3,11 @@ type Delegation = record {
   targets : opt vec principal;
   expiration : nat64;
 };
+type ExchangeCodeRequest = record {
+  code_verifier : text;
+  redirect_uri : text;
+  code : text;
+};
 type GetDelegationRequest = record {
   expire_at : nat64;
   provider : text;
@@ -31,10 +36,18 @@ type PrepareDelegationRequest = record {
   id_token : text;
 };
 type PrepareDelegationResponse = record { expire_at : nat64 };
-type Result = variant { Ok : GetDelegationResponse; Err : text };
-type Result_1 = variant { Ok; Err : text };
-type Result_2 = variant { Ok : PrepareDelegationResponse; Err : text };
+type RefreshTokenRequest = record { refresh_token : text };
+type Result = variant { Ok : TokenResponse; Err : text };
+type Result_1 = variant { Ok : GetDelegationResponse; Err : text };
+type Result_2 = variant { Ok; Err : text };
+type Result_3 = variant { Ok : PrepareDelegationResponse; Err : text };
 type SignedDelegation = record { signature : blob; delegation : Delegation };
+type TokenResponse = record {
+  access_token : text;
+  refresh_token : opt text;
+  expires_in : nat64;
+  token_type : text;
+};
 type UserInfo = record {
   "principal" : text;
   name : opt text;
@@ -43,14 +56,16 @@ type UserInfo = record {
 };
 service : () -> {
   cleanup_expired_sessions : () -> (nat64);
+  exchange_oauth_code : (ExchangeCodeRequest) -> (Result);
   get_caller : () -> (text) query;
-  get_delegation : (GetDelegationRequest) -> (Result) query;
+  get_delegation : (GetDelegationRequest) -> (Result_1) query;
   get_providers : () -> (vec OAuthProvider) query;
   get_session_count : () -> (nat64) query;
   get_user_info : () -> (UserInfo) query;
   greet : (text) -> (text) query;
   hello_world : () -> (text) query;
   is_authenticated : () -> (bool) query;
-  logout : (blob) -> (Result_1);
-  prepare_delegation : (PrepareDelegationRequest) -> (Result_2);
+  logout : (blob) -> (Result_2);
+  prepare_delegation : (PrepareDelegationRequest) -> (Result_3);
+  refresh_google_token : (RefreshTokenRequest) -> (Result);
 }
