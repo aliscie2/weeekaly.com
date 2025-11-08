@@ -141,3 +141,4 @@ upgrade-backend:
 	dfx deploy backend
 	gzip -fk target/wasm32-unknown-unknown/release/backend.wasm
 	mv target/wasm32-unknown-unknown/release/backend.wasm.gz ./tests/backend/
+ 

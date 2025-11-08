@@ -149,11 +149,13 @@ export default function App() {
   const queryClient = useQueryClient();
   
   // OAuth identity hook
-  const { login: loginWithOAuth, identity, isAuthenticated } = useOAuthIdentity();
+  const { login: loginWithOAuth, logout: logoutOAuth, identity, isAuthenticated, isLoading: authLoading } = useOAuthIdentity();
 
   // Update backend actor when identity changes (login or restore from storage)
   useEffect(() => {
     if (isAuthenticated && identity) {
+      console.log('✅ [App] User is authenticated');
+      
       // Update the backend actor with the authenticated identity
       setAuthenticatedActor(identity);
       
@@ -169,7 +171,7 @@ export default function App() {
         const userPicture = localStorage.getItem('ic-user-picture');
         
         console.log({
-          event: '📋 USER INFORMATION (After Login)',
+          event: '📋 USER INFORMATION (After Login/Restore)',
           email: {
             localStorage: userEmail || 'Not available',
             backend: userInfo.email || 'Not available'
@@ -194,8 +196,10 @@ export default function App() {
       }).catch((error) => {
         console.error('❌ [App] Failed to get user info:', error);
       });
+    } else if (!authLoading) {
+      console.log('⚠️ [App] User is NOT authenticated');
     }
-  }, [isAuthenticated, identity]);
+  }, [isAuthenticated, identity, authLoading]);
   
   // Use React Query to fetch backend data - only runs once and caches the result
   const { data: backendMessage } = useHelloWorld();
@@ -224,6 +228,14 @@ export default function App() {
   }, [calendarEventsFromBackend]);
   
   const [currentView, setCurrentView] = useState<'landing' | 'contact' | 'availability' | 'profile' | 'avatarEdit' | 'events' | 'eventDetails' | 'deleteConfirmation' | 'eventDeleteConfirmation' | 'quickGathering'>('landing');
+  
+  // Automatically switch to contact view when user is authenticated (on mount or after login)
+  useEffect(() => {
+    if (isAuthenticated && !authLoading && currentView === 'landing') {
+      console.log('✅ [App] User authenticated - switching from landing to contact view');
+      setCurrentView('contact');
+    }
+  }, [isAuthenticated, authLoading, currentView]);
   const [selectedAvailabilityId, setSelectedAvailabilityId] = useState<string | null>(null);
   const [availabilityToDelete, setAvailabilityToDelete] = useState<string | null>(null);
   const [eventToDelete, setEventToDelete] = useState<string | null>(null);
@@ -803,6 +815,14 @@ Next Steps:
   };
 
   const handleLogout = () => {
+    console.log('🚪 [App] Logging out user');
+    
+    // Clear all user data and session (handled by hook)
+    logoutOAuth();
+    
+    // Invalidate all queries to clear cached data
+    queryClient.clear();
+    
     toast.success('Logged out successfully!');
     setCurrentView('landing');
   };

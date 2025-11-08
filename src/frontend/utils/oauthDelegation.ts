@@ -43,6 +43,11 @@ async function generatePKCE() {
   return { verifier, challenge };
 }
 
+export interface LoginResult {
+  identity: Identity;
+  sessionKey: Ed25519KeyIdentity;
+}
+
 /**
  * Authenticate user with OAuth provider and create IC delegation identity
  * 
@@ -51,22 +56,25 @@ async function generatePKCE() {
  * 2. Waits for user authentication
  * 3. Receives ID token from callback
  * 4. Creates delegation with backend canister
- * 5. Returns authenticated Identity
+ * 5. Returns authenticated Identity and session key
  * 
  * @param provider - OAuth provider configuration (e.g., Google)
  * @param backendActor - Backend canister actor for delegation creation
  * @param onSuccess - Optional callback on successful authentication
  * @param onError - Optional callback on authentication error
- * @returns Promise resolving to Identity on success, null on failure
+ * @returns Promise resolving to LoginResult (identity and sessionKey) on success, null on failure
  * 
  * @example
  * ```typescript
- * const identity = await loginWithOAuth(
+ * const result = await loginWithOAuth(
  *   googleProvider,
  *   backendActor,
  *   () => console.log('Success!'),
  *   (err) => console.error(err)
  * );
+ * if (result) {
+ *   const { identity, sessionKey } = result;
+ * }
  * ```
  */
 export async function loginWithOAuth(
@@ -74,7 +82,7 @@ export async function loginWithOAuth(
   backendActor: any,
   onSuccess?: () => void,
   onError?: (error: Error) => void
-): Promise<Identity | null> {
+): Promise<LoginResult | null> {
   try {
     // 1. Generate session key pair
     const sessionKey = Ed25519KeyIdentity.generate();
@@ -225,7 +233,7 @@ export async function loginWithOAuth(
     const identity = sessionKey;
     
     onSuccess?.();
-    return identity;
+    return { identity, sessionKey };
     
   } catch (error) {
     console.error('❌ Authentication failed:', error);

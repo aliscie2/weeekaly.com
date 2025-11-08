@@ -15,7 +15,7 @@ export const AUTH_CONSTANTS = {
   POPUP_HEIGHT: 600,
   
   // Storage keys
-  STORAGE_KEY_DELEGATION: 'ic_delegation',
+  STORAGE_KEY_SESSION_KEY: 'ic_session_key',
   STORAGE_KEY_USER_EMAIL: 'ic-user-email',
   STORAGE_KEY_USER_NAME: 'ic-user-name',
   STORAGE_KEY_USER_ID: 'ic-user-id',

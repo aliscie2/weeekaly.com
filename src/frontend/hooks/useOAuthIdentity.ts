@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Identity } from '@dfinity/agent';
-import { DelegationIdentity } from '@dfinity/identity';
+import { Ed25519KeyIdentity } from '@dfinity/identity';
 import { loginWithOAuth, getProviders, OAuthProvider } from '../utils/oauthDelegation';
 import { backendActor } from '../utils/actor';
-import { storeIdentity, restoreIdentity, clearIdentity } from '../utils/identityStorage';
+import { storeSessionKey, restoreSessionKey, clearAllUserData } from '../utils/identityStorage';
 import { AUTH_CONSTANTS, AUTH_ERRORS } from '../utils/authConstants';
 
 /**
@@ -36,16 +36,14 @@ export function useOAuthIdentity() {
   // Restore identity and load providers on mount
   useEffect(() => {
     const init = async () => {
-      // Try to restore identity from localStorage
-      const restoredIdentity = restoreIdentity();
+      console.log('🔄 [useOAuthIdentity] Initializing - attempting to restore identity from storage');
       
-      if (restoredIdentity) {
-        setIdentity(restoredIdentity);
+      const sessionKey = restoreSessionKey();
+      if (sessionKey) {
+        setIdentity(sessionKey);
       }
       
-      // Load providers
       await loadProviders();
-      
       setIsLoading(false);
     };
     
@@ -79,7 +77,7 @@ export function useOAuthIdentity() {
         throw new Error(`${AUTH_ERRORS.PROVIDER_NOT_FOUND}: ${providerName}`);
       }
 
-      const newIdentity = await loginWithOAuth(
+      const result = await loginWithOAuth(
         provider,
         backendActor,
         () => {},
@@ -89,17 +87,14 @@ export function useOAuthIdentity() {
         }
       );
 
-      if (newIdentity) {
-        setIdentity(newIdentity);
-        
-        // TODO: Fix delegation chain storage - currently has issues with targets field
-        // Store identity for persistence
-        // if (newIdentity instanceof DelegationIdentity) {
-        //   storeIdentity(newIdentity);
-        // }
-        
+      if (result) {
+        const { identity, sessionKey } = result;
+        console.log('✅ [useOAuthIdentity] Login successful - setting identity');
+        setIdentity(identity);
+        storeSessionKey(sessionKey);
         return true;
       }
+      console.log('❌ [useOAuthIdentity] Login failed - no result returned');
       return false;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Login failed';
@@ -112,8 +107,9 @@ export function useOAuthIdentity() {
   };
 
   const logout = () => {
+    console.log('🚪 [useOAuthIdentity] Logging out - clearing identity');
     setIdentity(null);
-    clearIdentity();
+    clearAllUserData();
   };
 
   return {
