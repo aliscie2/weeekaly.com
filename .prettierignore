@@ -37,3 +37,6 @@ yarn.lock
 
 # Ignore backend files
 src/backend/
+
+# Ignore generated declarations
+src/declarations/

@@ -1,6 +1,6 @@
-import { motion } from 'motion/react';
-import { Button } from './ui/button';
-import { ArrowLeft, AlertTriangle } from 'lucide-react';
+import { motion } from "motion/react";
+import { Button } from "./ui/button";
+import { ArrowLeft, AlertTriangle } from "lucide-react";
 
 interface DeleteConfirmationPageProps {
   itemName: string;
@@ -51,7 +51,7 @@ export function DeleteConfirmationPage({
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
-            transition={{ delay: 0.4, type: 'spring', stiffness: 200 }}
+            transition={{ delay: 0.4, type: "spring", stiffness: 200 }}
             className="mx-auto w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6"
           >
             <AlertTriangle className="h-10 w-10 text-red-500" />

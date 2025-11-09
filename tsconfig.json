@@ -18,15 +18,23 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/frontend/*"],
-      "$/*": ["src/*"],
+      "$/*": ["src/*"]
     },
-    "types": [
-      "node",
-      "react",
-      "react-dom",
-      "vite/client"
-    ]
+    "types": ["node", "react", "react-dom", "vite/client"]
   },
-  "include": ["**/*.ts","src", "./types/**/*", "vite-env.d.ts", "vite-env.d.ts", "tests"],
-	"exclude": ["node_modules", "dist", "playwright.config.ts", "vitest.config.ts"]
+  "include": [
+    "**/*.ts",
+    "src",
+    "./types/**/*",
+    "vite-env.d.ts",
+    "vite-env.d.ts",
+    "tests"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "playwright.config.ts",
+    "vitest.config.ts",
+    "src/declarations"
+  ]
 }

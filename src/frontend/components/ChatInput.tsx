@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
-import { motion } from 'motion/react';
-import { Send } from 'lucide-react';
-import { Button } from './ui/button';
+import { useState, useRef, useEffect } from "react";
+import { motion } from "motion/react";
+import { Send } from "lucide-react";
+import { Button } from "./ui/button";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
@@ -9,8 +9,12 @@ interface ChatInputProps {
   showSuggestions: boolean;
 }
 
-export function ChatInput({ onSendMessage, onFocusChange, showSuggestions }: ChatInputProps) {
-  const [input, setInput] = useState('');
+export function ChatInput({
+  onSendMessage,
+  onFocusChange,
+  showSuggestions,
+}: ChatInputProps) {
+  const [input, setInput] = useState("");
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -27,15 +31,15 @@ export function ChatInput({ onSendMessage, onFocusChange, showSuggestions }: Cha
   const handleSubmit = () => {
     if (input.trim()) {
       onSendMessage(input.trim());
-      setInput('');
+      setInput("");
       if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = "auto";
       }
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
@@ -47,8 +51,9 @@ export function ChatInput({ onSendMessage, onFocusChange, showSuggestions }: Cha
 
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height =
+        textareaRef.current.scrollHeight + "px";
     }
   }, [input]);
 
@@ -68,14 +73,14 @@ export function ChatInput({ onSendMessage, onFocusChange, showSuggestions }: Cha
             className="flex gap-2 mb-4"
           >
             <Button
-              onClick={() => handleSuggestionClick('Yes')}
+              onClick={() => handleSuggestionClick("Yes")}
               variant="outline"
               className="bg-[#e8e4d9]/50 border-[#d4cfbe]/50 text-[#8b8475] hover:bg-[#8b8475] hover:text-[#f5f3ef] transition-all duration-300"
             >
               Yes
             </Button>
             <Button
-              onClick={() => handleSuggestionClick('No')}
+              onClick={() => handleSuggestionClick("No")}
               variant="outline"
               className="bg-[#e8e4d9]/50 border-[#d4cfbe]/50 text-[#8b8475] hover:bg-[#8b8475] hover:text-[#f5f3ef] transition-all duration-300"
             >

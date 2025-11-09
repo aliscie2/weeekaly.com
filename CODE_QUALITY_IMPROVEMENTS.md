@@ -1,6 +1,7 @@
 # 🎯 Code Quality Improvements - November 9, 2025
 
 ## Overview
+
 This document tracks all code quality, performance, and type safety improvements made to the codebase.
 
 ---
@@ -8,9 +9,11 @@ This document tracks all code quality, performance, and type safety improvements
 ## ✅ Performance Optimizations
 
 ### 1. React Query Cache Settings
+
 **Problem:** Cache was disabled (`staleTime: 0, gcTime: 0`), causing excessive API calls and re-renders.
 
 **Before:**
+
 ```typescript
 {
   staleTime: 0,    // Always refetch - no caching benefit
@@ -19,6 +22,7 @@ This document tracks all code quality, performance, and type safety improvements
 ```
 
 **After:**
+
 ```typescript
 {
   staleTime: 2 * 60 * 1000,  // Cache for 2 minutes - data is "fresh"
@@ -28,6 +32,7 @@ This document tracks all code quality, performance, and type safety improvements
 ```
 
 **Impact:**
+
 - ✅ API calls reduced by 96% (120/hour → 12/hour)
 - ✅ Eliminated unnecessary re-renders
 - ✅ Better user experience (faster UI)
@@ -37,26 +42,31 @@ This document tracks all code quality, performance, and type safety improvements
 ---
 
 ### 2. Memoization of Expensive Operations
+
 **Problem:** `convertGoogleEventsToAvailabilityEvents()` recalculated on every render.
 
 **Before:**
+
 ```typescript
 const events = convertGoogleEventsToAvailabilityEvents(); // ❌ Runs every render
 ```
 
 **After:**
-```typescript
-const convertGoogleEventsToAvailabilityEvents = useCallback((): AvailabilityEvent[] => {
-  // ... conversion logic
-}, [googleEvents, weekData]);
 
-const events = useMemo(() => 
-  convertGoogleEventsToAvailabilityEvents(), 
-  [convertGoogleEventsToAvailabilityEvents]
+```typescript
+const convertGoogleEventsToAvailabilityEvents =
+  useCallback((): AvailabilityEvent[] => {
+    // ... conversion logic
+  }, [googleEvents, weekData]);
+
+const events = useMemo(
+  () => convertGoogleEventsToAvailabilityEvents(),
+  [convertGoogleEventsToAvailabilityEvents],
 );
 ```
 
 **Impact:**
+
 - ✅ Conversion only runs when dependencies change
 - ✅ Reduced CPU usage
 - ✅ Smoother UI interactions
@@ -66,9 +76,11 @@ const events = useMemo(() =>
 ---
 
 ### 3. Console Log Cleanup
+
 **Problem:** Hundreds of console logs making debugging impossible and slowing down the app.
 
 **Removed from:**
+
 - `src/frontend/hooks/useBackend.ts` - All query/mutation logs
 - `src/frontend/components/AvailabilityPage.tsx` - Event conversion logs
 - `src/frontend/components/EventsPage.tsx` - Event listing logs
@@ -78,11 +90,13 @@ const events = useMemo(() =>
 - `src/frontend/index.tsx` - React Query success/settled logs
 
 **Kept (intentional):**
+
 - `src/frontend/utils/logger.ts` - Utility logger (dev only)
 - `src/frontend/utils/googleCalendar.ts` - API logger (dev only)
 - OAuth/Identity files - Auth flow debugging
 
 **Impact:**
+
 - ✅ Clean console for easier debugging
 - ✅ Reduced memory usage
 - ✅ Faster rendering (no console overhead)
@@ -92,9 +106,11 @@ const events = useMemo(() =>
 ## ✅ Type Safety Improvements
 
 ### 1. Replaced `any` Types with Proper Interfaces
+
 **Problem:** Using `any` defeats TypeScript's purpose and hides bugs.
 
 **Created Interface:**
+
 ```typescript
 interface GoogleCalendarEventTime {
   dateTime?: string;
@@ -132,11 +148,13 @@ export interface GoogleCalendarEvent {
 ```
 
 **Replaced in:**
+
 - `src/frontend/hooks/useBackend.ts` - All `any` types replaced
 - `src/frontend/components/AvailabilityPage.tsx` - Event type safety
 - `src/frontend/components/EventsPage.tsx` - Event mapping
 
 **Impact:**
+
 - ✅ Full autocomplete in IDE
 - ✅ Compile-time error detection
 - ✅ Better code documentation
@@ -145,11 +163,13 @@ export interface GoogleCalendarEvent {
 ---
 
 ### 2. Fixed Unused Variable Warnings
+
 **Problem:** TypeScript warnings about unused variables.
 
 **Solution:** Prefix with `_` to indicate intentionally unused.
 
 **Examples:**
+
 ```typescript
 // Before
 onError: (error, variables, context) => { ... }
@@ -159,18 +179,22 @@ onError: (error, _variables, context) => { ... }
 ```
 
 **Files Fixed:**
+
 - `src/frontend/hooks/useBackend.ts`
 - `src/frontend/hooks/useEventActions.ts`
 
 ---
 
 ### 3. Removed Unused Imports
+
 **Problem:** Unused imports clutter code and slow down builds.
 
 **Removed from:**
+
 - `src/frontend/components/EventFormModal.tsx` - Removed `Tooltip`, `TooltipTrigger`, `TooltipContent`, `Video`
 
 **Impact:**
+
 - ✅ Cleaner code
 - ✅ Smaller bundle size
 - ✅ Faster builds
@@ -179,46 +203,54 @@ onError: (error, _variables, context) => { ... }
 
 ## 📊 Performance Metrics
 
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| API Calls/Hour | 120 | 12 | 96% ↓ |
-| Console Logs/Min | 100+ | 0 | 100% ↓ |
-| TypeScript `any` | 15+ | 0 | 100% ↓ |
-| Unused Imports | 4 | 0 | 100% ↓ |
-| Cache Hit Rate | 0% | ~80% | 80% ↑ |
+| Metric           | Before | After | Improvement |
+| ---------------- | ------ | ----- | ----------- |
+| API Calls/Hour   | 120    | 12    | 96% ↓       |
+| Console Logs/Min | 100+   | 0     | 100% ↓      |
+| TypeScript `any` | 15+    | 0     | 100% ↓      |
+| Unused Imports   | 4      | 0     | 100% ↓      |
+| Cache Hit Rate   | 0%     | ~80%  | 80% ↑       |
 
 ---
 
 ## ❌ Intentionally Not Fixed
 
 ### 1. Magic Numbers
+
 **Reason:** Left as-is for readability. Adding constants would make code more verbose without significant benefit.
 
 **Examples:**
+
 - `max_response_bytes: Some(8192)` - Standard buffer size
 - `25_000_000_000` - IC timeout value
 - `MIN_DURATION = 15` - Self-documenting
 
 ### 2. Inconsistent Error Messages
+
 **Reason:** Different contexts require different error formats. Standardization would reduce clarity.
 
 **Examples:**
+
 - Simple: `'Cannot create overlapping events'`
 - Detailed: `` `Failed to create event: ${error.message || 'Unknown error'}` ``
 
 ### 3. Loading States
+
 **Reason:** Minimal loading indicators are sufficient for current UX. Can be enhanced later if needed.
 
 ### 4. Accessibility (ARIA)
+
 **Reason:** Basic accessibility is present. Full ARIA support can be added incrementally as needed.
 
 **What's Missing:**
+
 - `aria-label` on icon-only buttons
 - `role` attributes for custom interactive elements
 - Keyboard navigation (Tab, Enter, Escape)
 - Screen reader announcements
 
 **Can be added later when:**
+
 - Targeting accessibility compliance
 - User feedback requests it
 - Expanding to enterprise customers
@@ -228,16 +260,19 @@ onError: (error, _variables, context) => { ... }
 ## 🔄 Future Improvements
 
 ### High Priority
+
 - [ ] Add error boundaries for component crash protection
 - [ ] Implement retry logic for failed API calls
 - [ ] Add loading skeletons for better perceived performance
 
 ### Medium Priority
+
 - [ ] Add unit tests for critical functions
 - [ ] Implement service worker for offline support
 - [ ] Add analytics for performance monitoring
 
 ### Low Priority
+
 - [ ] Full accessibility audit and ARIA implementation
 - [ ] Internationalization (i18n) support
 - [ ] Dark mode support

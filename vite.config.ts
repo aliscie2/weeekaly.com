@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const dfxJson = JSON.parse(
-  readFileSync(path.resolve(__dirname, "dfx.json"), "utf8")
+  readFileSync(path.resolve(__dirname, "dfx.json"), "utf8"),
 );
 
 let localCanisters: any, prodCanisters: any, canisters: any;
@@ -19,14 +19,14 @@ let network = "local";
 function initCanisterIds() {
   try {
     localCanisters = JSON.parse(
-      readFileSync(path.resolve(".dfx", "local", "canister_ids.json"), "utf8")
+      readFileSync(path.resolve(".dfx", "local", "canister_ids.json"), "utf8"),
     );
   } catch (error) {
     console.log("No local canister_ids.json found.");
   }
   try {
     prodCanisters = JSON.parse(
-      readFileSync(path.resolve("canister_ids.json"), "utf8")
+      readFileSync(path.resolve("canister_ids.json"), "utf8"),
     );
     localEnv = false;
   } catch (error) {
@@ -70,7 +70,7 @@ export default defineConfig({
           ".dfx",
           networkName,
           "canisters",
-          name
+          name,
         );
         return { ...acc, [`canisters/${name}`]: join(outputRoot, "index.js") };
       }, {}),
@@ -82,13 +82,13 @@ export default defineConfig({
       (acc, [key, val]: [string, any]) => ({
         ...acc,
         [`process.env.${key.toUpperCase()}_CANISTER_ID`]: JSON.stringify(
-          isDevelopment ? val.local : val.ic
+          isDevelopment ? val.local : val.ic,
         ),
       }),
-      {}
+      {},
     ),
     "process.env.NODE_ENV": JSON.stringify(
-      isDevelopment ? "development" : "production"
+      isDevelopment ? "development" : "production",
     ),
   },
   plugins: [

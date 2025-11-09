@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { toast } from 'sonner';
-import { useCreateEvent, useUpdateEvent, useDeleteEvent } from './useBackend';
-import type { EventFormData } from '../components/EventFormModal';
+import { useState } from "react";
+import { toast } from "sonner";
+import { useCreateEvent, useUpdateEvent, useDeleteEvent } from "./useBackend";
+import type { EventFormData } from "../components/EventFormModal";
 
 /**
  * Reusable hook for event CRUD operations
@@ -10,7 +10,9 @@ import type { EventFormData } from '../components/EventFormModal';
 export function useEventActions() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
-  const [formInitialData, setFormInitialData] = useState<Partial<EventFormData> | undefined>();
+  const [formInitialData, setFormInitialData] = useState<
+    Partial<EventFormData> | undefined
+  >();
 
   const createEvent = useCreateEvent();
   const updateEvent = useUpdateEvent();
@@ -63,23 +65,27 @@ export function useEventActions() {
         },
         {
           onSuccess: () => {
-            toast.success('Event updated successfully!');
+            toast.success("Event updated successfully!");
             closeForm();
           },
           onError: (error: any) => {
-            toast.error(`Failed to update event: ${error.message || 'Unknown error'}`);
+            toast.error(
+              `Failed to update event: ${error.message || "Unknown error"}`,
+            );
           },
-        }
+        },
       );
     } else {
       // Create new event
       createEvent.mutate(data, {
         onSuccess: () => {
-          toast.success('Event created successfully!');
+          toast.success("Event created successfully!");
           closeForm();
         },
         onError: (error: any) => {
-          toast.error(`Failed to create event: ${error.message || 'Unknown error'}`);
+          toast.error(
+            `Failed to create event: ${error.message || "Unknown error"}`,
+          );
         },
       });
     }
@@ -88,20 +94,28 @@ export function useEventActions() {
   /**
    * Delete an event with confirmation
    */
-  const handleDeleteEvent = (eventId: string, eventTitle: string, onUndoCallback?: () => void) => {
+  const handleDeleteEvent = (
+    eventId: string,
+    eventTitle: string,
+    onUndoCallback?: () => void,
+  ) => {
     deleteEvent.mutate(eventId, {
       onSuccess: () => {
         // Show toast with undo option
         toast.success(`"${eventTitle}" deleted`, {
           duration: 3000,
-          action: onUndoCallback ? {
-            label: 'Undo',
-            onClick: onUndoCallback,
-          } : undefined,
+          action: onUndoCallback
+            ? {
+                label: "Undo",
+                onClick: onUndoCallback,
+              }
+            : undefined,
         });
       },
       onError: (error: any) => {
-        toast.error(`Failed to delete event: ${error.message || 'Unknown error'}`);
+        toast.error(
+          `Failed to delete event: ${error.message || "Unknown error"}`,
+        );
       },
     });
   };
@@ -114,7 +128,7 @@ export function useEventActions() {
       {
         eventId,
         updates: {
-          status: 'cancelled',
+          status: "cancelled",
         },
       },
       {
@@ -122,9 +136,9 @@ export function useEventActions() {
           toast.success(`You cancelled "${eventTitle}"`);
         },
         onError: (error: any) => {
-          toast.error(`Failed to cancel: ${error.message || 'Unknown error'}`);
+          toast.error(`Failed to cancel: ${error.message || "Unknown error"}`);
         },
-      }
+      },
     );
   };
 
@@ -133,7 +147,8 @@ export function useEventActions() {
     isFormOpen,
     editingEventId,
     formInitialData,
-    isLoading: createEvent.isPending || updateEvent.isPending || deleteEvent.isPending,
+    isLoading:
+      createEvent.isPending || updateEvent.isPending || deleteEvent.isPending,
 
     // Form actions
     openCreateForm,

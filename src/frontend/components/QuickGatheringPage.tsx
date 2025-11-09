@@ -1,13 +1,13 @@
-import { useState } from 'react';
-import { motion } from 'motion/react';
-import { Button } from './ui/button';
-import { ArrowLeft, Users, Clock, MapPin, Check, Search } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
-import { Badge } from './ui/badge';
-import { Slider } from './ui/slider';
-import { Label } from './ui/label';
-import { ScrollArea } from './ui/scroll-area';
-import { Input } from './ui/input';
+import { useState } from "react";
+import { motion } from "motion/react";
+import { Button } from "./ui/button";
+import { ArrowLeft, Users, Clock, MapPin, Check, Search } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { Badge } from "./ui/badge";
+import { Slider } from "./ui/slider";
+import { Label } from "./ui/label";
+import { ScrollArea } from "./ui/scroll-area";
+import { Input } from "./ui/input";
 
 interface Contact {
   id: string;
@@ -23,23 +23,25 @@ interface QuickGatheringPageProps {
   contacts: Contact[];
 }
 
-export function QuickGatheringPage({ onBack, contacts }: QuickGatheringPageProps) {
+export function QuickGatheringPage({
+  onBack,
+  contacts,
+}: QuickGatheringPageProps) {
   const [radius, setRadius] = useState<number>(5); // km
-  const [duration, setDuration] = useState<string>('1'); // hours
+  const [duration, setDuration] = useState<string>("1"); // hours
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
   // Filter available contacts within radius
-  const availableNearby = contacts.filter(contact => 
-    contact.available && 
-    (contact.distance || 0) <= radius
+  const availableNearby = contacts.filter(
+    (contact) => contact.available && (contact.distance || 0) <= radius,
   );
 
   const toggleContact = (contactId: string) => {
-    setSelectedContacts(prev => 
-      prev.includes(contactId) 
-        ? prev.filter(id => id !== contactId)
-        : [...prev, contactId]
+    setSelectedContacts((prev) =>
+      prev.includes(contactId)
+        ? prev.filter((id) => id !== contactId)
+        : [...prev, contactId],
     );
   };
 
@@ -76,7 +78,9 @@ export function QuickGatheringPage({ onBack, contacts }: QuickGatheringPageProps
           className="mb-4 md:mb-6"
         >
           <h1 className="text-[#8b8475] mb-2">Quick Gathering</h1>
-          <p className="text-sm text-[#a8a195]">Find nearby available contacts for spontaneous meetups</p>
+          <p className="text-sm text-[#a8a195]">
+            Find nearby available contacts for spontaneous meetups
+          </p>
         </motion.div>
 
         {/* Controls */}
@@ -94,7 +98,9 @@ export function QuickGatheringPage({ onBack, contacts }: QuickGatheringPageProps
                   <Clock className="h-4 w-4" />
                   I'm available for
                 </Label>
-                <span className="text-sm text-[#8b8475]">{duration} {duration === '1' ? 'hour' : 'hours'}</span>
+                <span className="text-sm text-[#8b8475]">
+                  {duration} {duration === "1" ? "hour" : "hours"}
+                </span>
               </div>
               <Slider
                 value={[parseInt(duration)]}
@@ -146,7 +152,7 @@ export function QuickGatheringPage({ onBack, contacts }: QuickGatheringPageProps
                   </Badge>
                 )}
               </div>
-              
+
               {/* Search Input */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#a8a195]" />
@@ -163,9 +169,14 @@ export function QuickGatheringPage({ onBack, contacts }: QuickGatheringPageProps
               <ScrollArea className="h-48 border border-[#d4cfbe]/40 rounded-xl bg-[#f5f3ef]">
                 <div className="p-2 space-y-1">
                   {contacts
-                    .filter(contact => 
-                      contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      contact.email.toLowerCase().includes(searchQuery.toLowerCase())
+                    .filter(
+                      (contact) =>
+                        contact.name
+                          .toLowerCase()
+                          .includes(searchQuery.toLowerCase()) ||
+                        contact.email
+                          .toLowerCase()
+                          .includes(searchQuery.toLowerCase()),
                     )
                     .map((contact) => {
                       const isSelected = selectedContacts.includes(contact.id);
@@ -174,27 +185,49 @@ export function QuickGatheringPage({ onBack, contacts }: QuickGatheringPageProps
                           key={contact.id}
                           onClick={() => toggleContact(contact.id)}
                           className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-all ${
-                            isSelected 
-                              ? 'bg-[#8b8475] hover:bg-[#6b6558] shadow-md scale-[1.02]' 
-                              : 'hover:bg-[#e8e4d9]/60'
+                            isSelected
+                              ? "bg-[#8b8475] hover:bg-[#6b6558] shadow-md scale-[1.02]"
+                              : "hover:bg-[#e8e4d9]/60"
                           }`}
                         >
-                          <div className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
-                            isSelected 
-                              ? 'bg-[#f5f3ef] border-[#f5f3ef]' 
-                              : 'border-[#d4cfbe] bg-white'
-                          }`}>
-                            {isSelected && <Check className="h-3 w-3 text-[#8b8475]" strokeWidth={3} />}
+                          <div
+                            className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                              isSelected
+                                ? "bg-[#f5f3ef] border-[#f5f3ef]"
+                                : "border-[#d4cfbe] bg-white"
+                            }`}
+                          >
+                            {isSelected && (
+                              <Check
+                                className="h-3 w-3 text-[#8b8475]"
+                                strokeWidth={3}
+                              />
+                            )}
                           </div>
-                          <Avatar className={`h-8 w-8 transition-all ${isSelected ? 'ring-2 ring-[#f5f3ef]' : ''}`}>
+                          <Avatar
+                            className={`h-8 w-8 transition-all ${isSelected ? "ring-2 ring-[#f5f3ef]" : ""}`}
+                          >
                             <AvatarImage src={contact.avatar} />
-                            <AvatarFallback className={`text-xs ${isSelected ? 'bg-[#f5f3ef] text-[#8b8475]' : 'bg-[#d4cfbe] text-[#8b8475]'}`}>
-                              {contact.name.split(' ').map(n => n[0]).join('')}
+                            <AvatarFallback
+                              className={`text-xs ${isSelected ? "bg-[#f5f3ef] text-[#8b8475]" : "bg-[#d4cfbe] text-[#8b8475]"}`}
+                            >
+                              {contact.name
+                                .split(" ")
+                                .map((n) => n[0])
+                                .join("")}
                             </AvatarFallback>
                           </Avatar>
                           <div className="flex-1 min-w-0">
-                            <p className={`text-sm truncate ${isSelected ? 'text-[#f5f3ef]' : 'text-[#8b8475]'}`}>{contact.name}</p>
-                            <p className={`text-xs truncate ${isSelected ? 'text-[#f5f3ef]/80' : 'text-[#a8a195]'}`}>{contact.email}</p>
+                            <p
+                              className={`text-sm truncate ${isSelected ? "text-[#f5f3ef]" : "text-[#8b8475]"}`}
+                            >
+                              {contact.name}
+                            </p>
+                            <p
+                              className={`text-xs truncate ${isSelected ? "text-[#f5f3ef]/80" : "text-[#a8a195]"}`}
+                            >
+                              {contact.email}
+                            </p>
                           </div>
                         </div>
                       );
@@ -225,45 +258,48 @@ export function QuickGatheringPage({ onBack, contacts }: QuickGatheringPageProps
               <div className="absolute w-3/4 h-3/4 border-2 border-[#8b8475]/20 rounded-full"></div>
               <div className="absolute w-2/4 h-2/4 border-2 border-[#8b8475]/20 rounded-full"></div>
               <div className="absolute w-1/4 h-1/4 border-2 border-[#8b8475]/20 rounded-full"></div>
-              
+
               {/* Center point (You) */}
               <div className="absolute w-4 h-4 bg-[#8b8475] rounded-full z-10 shadow-lg"></div>
-              
+
               {/* Available contacts as dots */}
               {availableNearby.map((contact, idx) => {
                 const angle = (idx / availableNearby.length) * 2 * Math.PI;
                 const distance = ((contact.distance || 0) / radius) * 45; // percentage of radius
                 const x = 50 + distance * Math.cos(angle);
                 const y = 50 + distance * Math.sin(angle);
-                
+
                 return (
                   <div
                     key={contact.id}
                     className="absolute cursor-pointer hover:scale-125 transition-transform"
-                    style={{ 
-                      left: `${x}%`, 
+                    style={{
+                      left: `${x}%`,
                       top: `${y}%`,
-                      transform: 'translate(-50%, -50%)'
+                      transform: "translate(-50%, -50%)",
                     }}
                     title={contact.name}
                   >
                     <Avatar className="w-8 h-8 border-2 border-white shadow-lg">
                       <AvatarImage src={contact.avatar} alt={contact.name} />
                       <AvatarFallback className="bg-[#8b8475] text-white text-xs">
-                        {contact.name.split(' ').map(n => n[0]).join('')}
+                        {contact.name
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")}
                       </AvatarFallback>
                     </Avatar>
                   </div>
                 );
               })}
             </div>
-            
+
             {/* Scanning animation */}
             <motion.div
               className="absolute inset-0 bg-gradient-to-r from-transparent via-[#8b8475]/10 to-transparent"
               animate={{ rotate: 360 }}
               transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-              style={{ transformOrigin: 'center' }}
+              style={{ transformOrigin: "center" }}
             />
           </div>
 
@@ -285,12 +321,17 @@ export function QuickGatheringPage({ onBack, contacts }: QuickGatheringPageProps
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={contact.avatar} />
                       <AvatarFallback className="bg-[#d4cfbe] text-[#8b8475]">
-                        {contact.name.split(' ').map(n => n[0]).join('')}
+                        {contact.name
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")}
                       </AvatarFallback>
                     </Avatar>
                     <div>
                       <p className="text-[#8b8475]">{contact.name}</p>
-                      <p className="text-xs text-[#a8a195]">{contact.distance?.toFixed(1)} km away</p>
+                      <p className="text-xs text-[#a8a195]">
+                        {contact.distance?.toFixed(1)} km away
+                      </p>
                     </div>
                   </div>
                   <Badge className="bg-green-500/20 text-green-700 border-green-500/30 hover:bg-green-500/20 text-xs">
@@ -304,9 +345,15 @@ export function QuickGatheringPage({ onBack, contacts }: QuickGatheringPageProps
           {/* Create Gathering Button */}
           <Button
             className="w-full mt-6 bg-[#8b8475] hover:bg-[#6b6558] text-[#f5f3ef] h-10 md:h-11"
-            disabled={availableNearby.length === 0 && selectedContacts.length === 0}
+            disabled={
+              availableNearby.length === 0 && selectedContacts.length === 0
+            }
           >
-            Create Gathering ({availableNearby.length + selectedContacts.length} {availableNearby.length + selectedContacts.length === 1 ? 'person' : 'people'})
+            Create Gathering ({availableNearby.length + selectedContacts.length}{" "}
+            {availableNearby.length + selectedContacts.length === 1
+              ? "person"
+              : "people"}
+            )
           </Button>
         </motion.div>
       </div>

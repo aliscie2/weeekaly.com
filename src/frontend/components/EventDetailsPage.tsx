@@ -1,18 +1,18 @@
-import { useState } from 'react';
-import { motion } from 'motion/react';
-import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
-import { Button } from './ui/button';
-import { Card } from './ui/card';
-import { Separator } from './ui/separator';
-import { Badge } from './ui/badge';
-import { ScrollArea } from './ui/scroll-area';
-import { Input } from './ui/input';
-import { Textarea } from './ui/textarea';
-import { 
-  Clock, 
-  Video, 
-  Sparkles, 
-  MapPin, 
+import { useState } from "react";
+import { motion } from "motion/react";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import { Separator } from "./ui/separator";
+import { Badge } from "./ui/badge";
+import { ScrollArea } from "./ui/scroll-area";
+import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
+import {
+  Clock,
+  Video,
+  Sparkles,
+  MapPin,
   Calendar as CalendarIcon,
   Users,
   ArrowLeft,
@@ -20,11 +20,11 @@ import {
   Edit,
   Save,
   X,
-  Trash2
-} from 'lucide-react';
-import { format, isFuture, parse } from 'date-fns';
-import { Event } from './EventsPage';
-import { toast } from 'sonner';
+  Trash2,
+} from "lucide-react";
+import { format, isFuture } from "date-fns";
+import { Event } from "./EventsPage";
+import { toast } from "sonner";
 
 interface EventDetailsPageProps {
   event: Event;
@@ -33,7 +33,12 @@ interface EventDetailsPageProps {
   backButtonText?: string;
 }
 
-export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back to Events' }: EventDetailsPageProps) {
+export function EventDetailsPage({
+  event,
+  onBack,
+  onSave,
+  backButtonText = "Back to Events",
+}: EventDetailsPageProps) {
   // Guard against undefined event
   if (!event) {
     return (
@@ -51,20 +56,20 @@ export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back
   const [isEditing, setIsEditing] = useState(false);
   const [editedEvent, setEditedEvent] = useState<Event>(event);
 
-  const formatTime = (date: Date) => format(date, 'h:mm a');
-  const formatDate = (date: Date) => format(date, 'EEEE, MMMM d, yyyy');
-  const formatDateInput = (date: Date) => format(date, 'yyyy-MM-dd');
-  const formatTimeInput = (date: Date) => format(date, 'HH:mm');
+  const formatTime = (date: Date) => format(date, "h:mm a");
+  const formatDate = (date: Date) => format(date, "EEEE, MMMM d, yyyy");
+  const formatDateInput = (date: Date) => format(date, "yyyy-MM-dd");
+  const formatTimeInput = (date: Date) => format(date, "HH:mm");
 
   const handleSave = () => {
     if (!editedEvent.title.trim()) {
-      toast.error('Title is required');
+      toast.error("Title is required");
       return;
     }
-    
+
     if (onSave) {
       onSave(editedEvent);
-      toast.success('Event updated successfully');
+      toast.success("Event updated successfully");
     }
     setIsEditing(false);
   };
@@ -77,44 +82,50 @@ export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back
   const handleDateChange = (dateStr: string) => {
     const currentDate = new Date(dateStr);
     const newStartTime = new Date(currentDate);
-    newStartTime.setHours(editedEvent.startTime.getHours(), editedEvent.startTime.getMinutes());
-    
+    newStartTime.setHours(
+      editedEvent.startTime.getHours(),
+      editedEvent.startTime.getMinutes(),
+    );
+
     const newEndTime = new Date(currentDate);
-    newEndTime.setHours(editedEvent.endTime.getHours(), editedEvent.endTime.getMinutes());
-    
+    newEndTime.setHours(
+      editedEvent.endTime.getHours(),
+      editedEvent.endTime.getMinutes(),
+    );
+
     setEditedEvent({
       ...editedEvent,
       startTime: newStartTime,
-      endTime: newEndTime
+      endTime: newEndTime,
     });
   };
 
   const handleStartTimeChange = (timeStr: string) => {
-    const [hours, minutes] = timeStr.split(':').map(Number);
+    const [hours, minutes] = timeStr.split(":").map(Number);
     const newStartTime = new Date(editedEvent.startTime);
     newStartTime.setHours(hours, minutes);
-    
+
     setEditedEvent({
       ...editedEvent,
-      startTime: newStartTime
+      startTime: newStartTime,
     });
   };
 
   const handleEndTimeChange = (timeStr: string) => {
-    const [hours, minutes] = timeStr.split(':').map(Number);
+    const [hours, minutes] = timeStr.split(":").map(Number);
     const newEndTime = new Date(editedEvent.endTime);
     newEndTime.setHours(hours, minutes);
-    
+
     setEditedEvent({
       ...editedEvent,
-      endTime: newEndTime
+      endTime: newEndTime,
     });
   };
 
   const handleRemoveAttendee = (attendeeId: string) => {
     setEditedEvent({
       ...editedEvent,
-      attendees: editedEvent.attendees.filter(a => a.id !== attendeeId)
+      attendees: editedEvent.attendees.filter((a) => a.id !== attendeeId),
     });
   };
 
@@ -186,7 +197,7 @@ export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back
           <Card className="bg-white/60 border-[#d4cfbe]/40 shadow-lg mb-6 overflow-hidden">
             {/* Hero Image */}
             {event.thumbnail && (
-              <div 
+              <div
                 className="w-full h-48 md:h-64 bg-cover bg-center"
                 style={{ backgroundImage: `url(${event.thumbnail})` }}
               />
@@ -198,7 +209,9 @@ export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back
                 {isEditing ? (
                   <Input
                     value={editedEvent.title}
-                    onChange={(e) => setEditedEvent({ ...editedEvent, title: e.target.value })}
+                    onChange={(e) =>
+                      setEditedEvent({ ...editedEvent, title: e.target.value })
+                    }
                     className="text-2xl md:text-3xl text-[#8b8475] border-[#d4cfbe]/40 focus:border-[#8b8475] h-auto py-2"
                     placeholder="Event title"
                   />
@@ -248,20 +261,28 @@ export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back
                       />
                     </div>
                   ) : (
-                    <span>{formatTime(event.startTime)} - {formatTime(event.endTime)}</span>
+                    <span>
+                      {formatTime(event.startTime)} -{" "}
+                      {formatTime(event.endTime)}
+                    </span>
                   )}
                 </div>
                 <div className="flex items-center gap-2 text-[#8b8475]">
                   <MapPin className="h-5 w-5 shrink-0" />
                   {isEditing ? (
                     <Input
-                      value={editedEvent.location || ''}
-                      onChange={(e) => setEditedEvent({ ...editedEvent, location: e.target.value })}
+                      value={editedEvent.location || ""}
+                      onChange={(e) =>
+                        setEditedEvent({
+                          ...editedEvent,
+                          location: e.target.value,
+                        })
+                      }
                       className="border-[#d4cfbe]/40 focus:border-[#8b8475] text-[#8b8475]"
                       placeholder="Add location"
                     />
                   ) : (
-                    <span>{event.location || 'No location'}</span>
+                    <span>{event.location || "No location"}</span>
                   )}
                 </div>
               </div>
@@ -269,7 +290,7 @@ export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back
               {/* Google Meet Link */}
               {event.meetLink && (
                 <Button
-                  onClick={() => window.open(event.meetLink, '_blank')}
+                  onClick={() => window.open(event.meetLink, "_blank")}
                   className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white mb-6"
                 >
                   <Video className="h-4 w-4 mr-2" />
@@ -285,40 +306,57 @@ export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back
                 <div className="flex items-center gap-2 mb-3">
                   <Sparkles className="h-5 w-5 text-[#8b8475]" />
                   <h2 className="text-lg text-[#8b8475]">
-                    {isEditing ? 'Description' : 'AI Summary'}
+                    {isEditing ? "Description" : "AI Summary"}
                   </h2>
                 </div>
                 <div className="bg-[#f5f3ef]/50 border border-[#d4cfbe]/40 rounded-xl p-4 md:p-6">
                   {isEditing ? (
                     <Textarea
                       value={editedEvent.aiSummary}
-                      onChange={(e) => setEditedEvent({ ...editedEvent, aiSummary: e.target.value })}
+                      onChange={(e) =>
+                        setEditedEvent({
+                          ...editedEvent,
+                          aiSummary: e.target.value,
+                        })
+                      }
                       className="min-h-[200px] border-[#d4cfbe]/40 focus:border-[#8b8475] text-[#8b8475] resize-none"
                       placeholder="Add description"
                     />
                   ) : (
                     <div className="text-[#8b8475] leading-relaxed whitespace-pre-line space-y-4">
-                      {event.aiSummary.split('\n\n').map((section, index) => (
+                      {event.aiSummary.split("\n\n").map((section, index) => (
                         <div key={index}>
-                          {section.split('\n').map((line, lineIndex) => {
-                            const isBullet = line.trim().startsWith('•');
-                            const isHeading = line.endsWith(':') && !isBullet && line.length < 50;
-                            
+                          {section.split("\n").map((line, lineIndex) => {
+                            const isBullet = line.trim().startsWith("•");
+                            const isHeading =
+                              line.endsWith(":") &&
+                              !isBullet &&
+                              line.length < 50;
+
                             if (isHeading) {
                               return (
-                                <p key={lineIndex} className="text-[#8b8475] mb-2 mt-3 first:mt-0">
+                                <p
+                                  key={lineIndex}
+                                  className="text-[#8b8475] mb-2 mt-3 first:mt-0"
+                                >
                                   {line}
                                 </p>
                               );
                             } else if (isBullet) {
                               return (
-                                <p key={lineIndex} className="text-[#8b8475]/90 ml-2 mb-1.5">
+                                <p
+                                  key={lineIndex}
+                                  className="text-[#8b8475]/90 ml-2 mb-1.5"
+                                >
                                   {line}
                                 </p>
                               );
                             } else if (line.trim()) {
                               return (
-                                <p key={lineIndex} className="text-[#8b8475]/90">
+                                <p
+                                  key={lineIndex}
+                                  className="text-[#8b8475]/90"
+                                >
                                   {line}
                                 </p>
                               );
@@ -339,45 +377,61 @@ export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back
                 <div className="flex items-center gap-2 mb-4">
                   <Users className="h-5 w-5 text-[#8b8475]" />
                   <h2 className="text-lg text-[#8b8475]">
-                    Attendees ({isEditing ? editedEvent.attendees.length : event.attendees.length})
+                    Attendees (
+                    {isEditing
+                      ? editedEvent.attendees.length
+                      : event.attendees.length}
+                    )
                   </h2>
                 </div>
 
                 <ScrollArea className="max-h-[400px]">
                   <div className="space-y-3">
-                    {(isEditing ? editedEvent.attendees : event.attendees).map((attendee) => (
-                      <motion.div
-                        key={attendee.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        <Card className="p-4 bg-[#f5f3ef]/50 border-[#d4cfbe]/40">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-12 w-12 border-2 border-[#e8e4d9]">
-                              <AvatarImage src={attendee.avatar} alt={attendee.name} className="object-cover" />
-                              <AvatarFallback className="bg-[#8b8475] text-white">
-                                {attendee.name.charAt(0).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[#8b8475]">{attendee.name}</p>
-                              <p className="text-sm text-[#a8a195] truncate">{attendee.email}</p>
+                    {(isEditing ? editedEvent.attendees : event.attendees).map(
+                      (attendee) => (
+                        <motion.div
+                          key={attendee.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          <Card className="p-4 bg-[#f5f3ef]/50 border-[#d4cfbe]/40">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-12 w-12 border-2 border-[#e8e4d9]">
+                                <AvatarImage
+                                  src={attendee.avatar}
+                                  alt={attendee.name}
+                                  className="object-cover"
+                                />
+                                <AvatarFallback className="bg-[#8b8475] text-white">
+                                  {attendee.name.charAt(0).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[#8b8475]">
+                                  {attendee.name}
+                                </p>
+                                <p className="text-sm text-[#a8a195] truncate">
+                                  {attendee.email}
+                                </p>
+                              </div>
+                              {isEditing && (
+                                <Button
+                                  onClick={() =>
+                                    handleRemoveAttendee(attendee.id)
+                                  }
+                                  variant="ghost"
+                                  size="icon"
+                                  className="text-red-500 hover:text-red-600 hover:bg-red-50 shrink-0"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
                             </div>
-                            {isEditing && (
-                              <Button
-                                onClick={() => handleRemoveAttendee(attendee.id)}
-                                variant="ghost"
-                                size="icon"
-                                className="text-red-500 hover:text-red-600 hover:bg-red-50 shrink-0"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                        </Card>
-                      </motion.div>
-                    ))}
+                          </Card>
+                        </motion.div>
+                      ),
+                    )}
                   </div>
                 </ScrollArea>
               </div>

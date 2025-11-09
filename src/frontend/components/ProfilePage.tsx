@@ -1,14 +1,25 @@
-import { useState, useRef } from 'react';
-import { motion } from 'motion/react';
-import { Button } from './ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
-import { Star, Trash2, Plus, LogOut, Mail, Edit2, Check, X, Camera, ArrowLeft } from 'lucide-react';
-import { Card } from './ui/card';
-import { Separator } from './ui/separator';
-import { ScrollArea } from './ui/scroll-area';
-import { Input } from './ui/input';
-import { toast } from 'sonner';
-import { useQueryClient } from '@tanstack/react-query';
+import { useState, useRef } from "react";
+import { motion } from "motion/react";
+import { Button } from "./ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import {
+  Star,
+  Trash2,
+  Plus,
+  LogOut,
+  Mail,
+  Edit2,
+  Check,
+  X,
+  Camera,
+  ArrowLeft,
+} from "lucide-react";
+import { Card } from "./ui/card";
+import { Separator } from "./ui/separator";
+import { ScrollArea } from "./ui/scroll-area";
+import { Input } from "./ui/input";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface GoogleAccount {
   id: string;
@@ -59,32 +70,35 @@ export function ProfilePage({
   const handleLogoutWithCleanup = () => {
     // 1. Clear React Query cache (all calendar events, etc.)
     queryClient.clear();
-    
+
     // 2. Remove all queries to prevent any cached data from being used
     queryClient.removeQueries();
-    
+
     // 3. Clear localStorage completely (not just calendar_user_email)
     localStorage.clear();
-    
+
     // 4. Clear sessionStorage (PKCE verifier, etc.)
     sessionStorage.clear();
-    
+
     // 5. Clear any IndexedDB data (if used by React Query)
     if (window.indexedDB) {
-      window.indexedDB.databases().then((dbs) => {
-        dbs.forEach((db) => {
-          if (db.name) {
-            window.indexedDB.deleteDatabase(db.name);
-          }
+      window.indexedDB
+        .databases()
+        .then((dbs) => {
+          dbs.forEach((db) => {
+            if (db.name) {
+              window.indexedDB.deleteDatabase(db.name);
+            }
+          });
+        })
+        .catch(() => {
+          // Silently fail if IndexedDB cleanup fails
         });
-      }).catch(() => {
-        // Silently fail if IndexedDB cleanup fails
-      });
     }
-    
+
     // 6. Show success message
-    toast.success('Logged out successfully');
-    
+    toast.success("Logged out successfully");
+
     // 7. Call the original logout handler
     onLogout();
   };
@@ -98,7 +112,7 @@ export function ProfilePage({
     if (editedUsername.trim() && onUpdateUsername) {
       onUpdateUsername(editedUsername.trim());
       setIsEditingName(false);
-      toast.success('Username updated!');
+      toast.success("Username updated!");
     }
   };
 
@@ -115,7 +129,7 @@ export function ProfilePage({
     const file = e.target.files?.[0];
     if (file && onStartAvatarEdit) {
       const reader = new FileReader();
-      reader.addEventListener('load', () => {
+      reader.addEventListener("load", () => {
         onStartAvatarEdit(reader.result as string);
       });
       reader.readAsDataURL(file);
@@ -157,13 +171,20 @@ export function ProfilePage({
           <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
             {/* Avatar */}
             <div className="relative group">
-              <Avatar className="h-24 w-24 md:h-32 md:w-32 border-4 border-[#e8e4d9] cursor-pointer" onClick={handleAvatarClick}>
-                <AvatarImage src={userAvatar} alt={username} className="object-cover" />
+              <Avatar
+                className="h-24 w-24 md:h-32 md:w-32 border-4 border-[#e8e4d9] cursor-pointer"
+                onClick={handleAvatarClick}
+              >
+                <AvatarImage
+                  src={userAvatar}
+                  alt={username}
+                  className="object-cover"
+                />
                 <AvatarFallback className="bg-[#8b8475] text-white text-2xl md:text-3xl">
                   {username.charAt(0).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
-              <div 
+              <div
                 onClick={handleAvatarClick}
                 className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center"
               >
@@ -183,7 +204,9 @@ export function ProfilePage({
               <div className="flex items-center justify-center md:justify-start gap-3 mb-2">
                 {!isEditingName ? (
                   <>
-                    <h1 className="text-2xl md:text-3xl text-[#8b8475]">{username}</h1>
+                    <h1 className="text-2xl md:text-3xl text-[#8b8475]">
+                      {username}
+                    </h1>
                     <Button
                       onClick={handleEditName}
                       variant="ghost"
@@ -201,8 +224,8 @@ export function ProfilePage({
                       className="text-2xl md:text-3xl text-[#8b8475] bg-[#f5f3ef] border-[#d4cfbe]/40 focus:ring-2 focus:ring-[#8b8475]/20 max-w-xs"
                       autoFocus
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveName();
-                        if (e.key === 'Escape') handleCancelEdit();
+                        if (e.key === "Enter") handleSaveName();
+                        if (e.key === "Escape") handleCancelEdit();
                       }}
                     />
                     <Button
@@ -253,7 +276,9 @@ export function ProfilePage({
           className="bg-white/60 border border-[#d4cfbe]/40 rounded-3xl p-6 md:p-8 shadow-lg"
         >
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl md:text-2xl text-[#8b8475]">Google Accounts</h2>
+            <h2 className="text-xl md:text-2xl text-[#8b8475]">
+              Google Accounts
+            </h2>
             <Button
               onClick={onAddAccount}
               size="sm"
@@ -279,7 +304,11 @@ export function ProfilePage({
                     <div className="flex items-center gap-4">
                       {/* Account Avatar */}
                       <Avatar className="h-12 w-12 border-2 border-[#e8e4d9]">
-                        <AvatarImage src={account.avatar} alt={account.name} className="object-cover" />
+                        <AvatarImage
+                          src={account.avatar}
+                          alt={account.name}
+                          className="object-cover"
+                        />
                         <AvatarFallback className="bg-[#8b8475] text-white">
                           {account.name.charAt(0).toUpperCase()}
                         </AvatarFallback>
@@ -288,7 +317,9 @@ export function ProfilePage({
                       {/* Account Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <p className="text-[#8b8475] truncate">{account.name}</p>
+                          <p className="text-[#8b8475] truncate">
+                            {account.name}
+                          </p>
                           {account.isDefault && (
                             <Star className="h-4 w-4 fill-yellow-500 text-yellow-500 flex-shrink-0" />
                           )}

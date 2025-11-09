@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Textarea } from './ui/textarea';
-import { Label } from './ui/label';
-import { X, Calendar, Clock, MapPin, Users } from 'lucide-react';
-import { format } from 'date-fns';
-import { isPastDateTime } from '../utils/dateHelpers';
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
+import { Label } from "./ui/label";
+import { X, Calendar, Clock, MapPin, Users } from "lucide-react";
+
+import { isPastDateTime } from "../utils/dateHelpers";
 
 export interface EventFormData {
   summary: string;
@@ -24,7 +24,7 @@ interface EventFormModalProps {
   onSubmit: (data: EventFormData) => void;
   initialData?: Partial<EventFormData>;
   isLoading?: boolean;
-  mode: 'create' | 'edit';
+  mode: "create" | "edit";
 }
 
 export function EventFormModal({
@@ -36,27 +36,27 @@ export function EventFormModal({
   mode,
 }: EventFormModalProps) {
   const [formData, setFormData] = useState<EventFormData>({
-    summary: '',
-    description: '',
+    summary: "",
+    description: "",
     start: new Date(),
     end: new Date(Date.now() + 3600000), // 1 hour later
-    location: '',
+    location: "",
     attendees: [],
     conferenceData: true, // Auto-enable Google Meet by default
   });
 
-  const [attendeeEmail, setAttendeeEmail] = useState('');
+  const [attendeeEmail, setAttendeeEmail] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Initialize form with initial data
   useEffect(() => {
     if (initialData) {
       setFormData({
-        summary: initialData.summary || '',
-        description: initialData.description || '',
+        summary: initialData.summary || "",
+        description: initialData.description || "",
         start: initialData.start || new Date(),
         end: initialData.end || new Date(Date.now() + 3600000),
-        location: initialData.location || '',
+        location: initialData.location || "",
         attendees: initialData.attendees || [],
         conferenceData: true, // Always add Google Meet
       });
@@ -67,28 +67,28 @@ export function EventFormModal({
     const newErrors: Record<string, string> = {};
 
     if (!formData.summary.trim()) {
-      newErrors.summary = 'Title is required';
+      newErrors.summary = "Title is required";
     }
 
     // Check if start time is in the past (only for new events)
-    if (mode === 'create' && isPastDateTime(formData.start)) {
-      newErrors.start = 'Cannot create events in the past';
+    if (mode === "create" && isPastDateTime(formData.start)) {
+      newErrors.start = "Cannot create events in the past";
     }
 
     if (formData.end <= formData.start) {
-      newErrors.end = 'End time must be after start time';
+      newErrors.end = "End time must be after start time";
     }
 
     // Check minimum duration (15 minutes)
     const durationMs = formData.end.getTime() - formData.start.getTime();
     const durationMinutes = durationMs / (1000 * 60);
     if (durationMinutes < 15) {
-      newErrors.end = 'Event must be at least 15 minutes long';
+      newErrors.end = "Event must be at least 15 minutes long";
     }
 
     // Check maximum duration (8 hours)
     if (durationMinutes > 480) {
-      newErrors.end = 'Event cannot be longer than 8 hours';
+      newErrors.end = "Event cannot be longer than 8 hours";
     }
 
     setErrors(newErrors);
@@ -97,7 +97,7 @@ export function EventFormModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) {
       return;
     }
@@ -112,13 +112,13 @@ export function EventFormModal({
     // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setErrors({ ...errors, attendee: 'Invalid email format' });
+      setErrors({ ...errors, attendee: "Invalid email format" });
       return;
     }
 
     // Check if already added
-    if (formData.attendees?.some(a => a.email === email)) {
-      setErrors({ ...errors, attendee: 'Email already added' });
+    if (formData.attendees?.some((a) => a.email === email)) {
+      setErrors({ ...errors, attendee: "Email already added" });
       return;
     }
 
@@ -126,23 +126,23 @@ export function EventFormModal({
       ...formData,
       attendees: [...(formData.attendees || []), { email }],
     });
-    setAttendeeEmail('');
-    setErrors({ ...errors, attendee: '' });
+    setAttendeeEmail("");
+    setErrors({ ...errors, attendee: "" });
   };
 
   const handleRemoveAttendee = (email: string) => {
     setFormData({
       ...formData,
-      attendees: formData.attendees?.filter(a => a.email !== email),
+      attendees: formData.attendees?.filter((a) => a.email !== email),
     });
   };
 
   const formatDateTimeLocal = (date: Date): string => {
     const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
 
@@ -165,7 +165,7 @@ export function EventFormModal({
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-[#d4cfbe]/40">
             <h2 className="text-2xl text-[#8b8475]">
-              {mode === 'create' ? 'Create New Event' : 'Edit Event'}
+              {mode === "create" ? "Create New Event" : "Edit Event"}
             </h2>
             <Button
               variant="ghost"
@@ -178,7 +178,10 @@ export function EventFormModal({
           </div>
 
           {/* Form */}
-          <form onSubmit={handleSubmit} className="overflow-y-auto max-h-[calc(90vh-140px)]">
+          <form
+            onSubmit={handleSubmit}
+            className="overflow-y-auto max-h-[calc(90vh-140px)]"
+          >
             <div className="p-6 space-y-6">
               {/* Title */}
               <div className="space-y-2">
@@ -188,9 +191,11 @@ export function EventFormModal({
                 <Input
                   id="summary"
                   value={formData.summary}
-                  onChange={(e) => setFormData({ ...formData, summary: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, summary: e.target.value })
+                  }
                   placeholder="Team Meeting"
-                  className={`bg-white/60 border-[#d4cfbe]/40 ${errors.summary ? 'border-red-500' : ''}`}
+                  className={`bg-white/60 border-[#d4cfbe]/40 ${errors.summary ? "border-red-500" : ""}`}
                 />
                 {errors.summary && (
                   <p className="text-sm text-red-500">{errors.summary}</p>
@@ -200,7 +205,10 @@ export function EventFormModal({
               {/* Date and Time */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="start" className="text-[#8b8475] flex items-center gap-2">
+                  <Label
+                    htmlFor="start"
+                    className="text-[#8b8475] flex items-center gap-2"
+                  >
                     <Calendar className="h-4 w-4" />
                     Start Time *
                   </Label>
@@ -208,8 +216,13 @@ export function EventFormModal({
                     id="start"
                     type="datetime-local"
                     value={formatDateTimeLocal(formData.start)}
-                    onChange={(e) => setFormData({ ...formData, start: parseDateTimeLocal(e.target.value) })}
-                    className={`bg-white/60 border-[#d4cfbe]/40 ${errors.start ? 'border-red-500' : ''}`}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        start: parseDateTimeLocal(e.target.value),
+                      })
+                    }
+                    className={`bg-white/60 border-[#d4cfbe]/40 ${errors.start ? "border-red-500" : ""}`}
                   />
                   {errors.start && (
                     <p className="text-sm text-red-500">{errors.start}</p>
@@ -217,7 +230,10 @@ export function EventFormModal({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="end" className="text-[#8b8475] flex items-center gap-2">
+                  <Label
+                    htmlFor="end"
+                    className="text-[#8b8475] flex items-center gap-2"
+                  >
                     <Clock className="h-4 w-4" />
                     End Time *
                   </Label>
@@ -225,8 +241,13 @@ export function EventFormModal({
                     id="end"
                     type="datetime-local"
                     value={formatDateTimeLocal(formData.end)}
-                    onChange={(e) => setFormData({ ...formData, end: parseDateTimeLocal(e.target.value) })}
-                    className={`bg-white/60 border-[#d4cfbe]/40 ${errors.end ? 'border-red-500' : ''}`}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        end: parseDateTimeLocal(e.target.value),
+                      })
+                    }
+                    className={`bg-white/60 border-[#d4cfbe]/40 ${errors.end ? "border-red-500" : ""}`}
                   />
                   {errors.end && (
                     <p className="text-sm text-red-500">{errors.end}</p>
@@ -236,14 +257,19 @@ export function EventFormModal({
 
               {/* Location */}
               <div className="space-y-2">
-                <Label htmlFor="location" className="text-[#8b8475] flex items-center gap-2">
+                <Label
+                  htmlFor="location"
+                  className="text-[#8b8475] flex items-center gap-2"
+                >
                   <MapPin className="h-4 w-4" />
                   Location
                 </Label>
                 <Input
                   id="location"
                   value={formData.location}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, location: e.target.value })
+                  }
                   placeholder="Conference Room A"
                   className="bg-white/60 border-[#d4cfbe]/40"
                 />
@@ -257,7 +283,9 @@ export function EventFormModal({
                 <Textarea
                   id="description"
                   value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
                   placeholder="Add event details..."
                   rows={4}
                   className="bg-white/60 border-[#d4cfbe]/40 resize-none"
@@ -274,7 +302,10 @@ export function EventFormModal({
                   <Input
                     value={attendeeEmail}
                     onChange={(e) => setAttendeeEmail(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddAttendee())}
+                    onKeyPress={(e) =>
+                      e.key === "Enter" &&
+                      (e.preventDefault(), handleAddAttendee())
+                    }
                     placeholder="email@example.com"
                     className="bg-white/60 border-[#d4cfbe]/40"
                   />
@@ -290,7 +321,7 @@ export function EventFormModal({
                 {errors.attendee && (
                   <p className="text-sm text-red-500">{errors.attendee}</p>
                 )}
-                
+
                 {/* Attendee chips */}
                 {formData.attendees && formData.attendees.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-3">
@@ -332,7 +363,11 @@ export function EventFormModal({
                 disabled={isLoading}
                 className="bg-[#8b8475] hover:bg-[#6b6558] text-[#f5f3ef]"
               >
-                {isLoading ? 'Saving...' : mode === 'create' ? 'Create Event' : 'Save Changes'}
+                {isLoading
+                  ? "Saving..."
+                  : mode === "create"
+                    ? "Create Event"
+                    : "Save Changes"}
               </Button>
             </div>
           </form>

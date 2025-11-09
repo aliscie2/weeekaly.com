@@ -29,8 +29,7 @@ deploy-all:
 	dfx killall 2>/dev/null || true
 	dfx stop 2>/dev/null || true
 	dfx start --background --clean --host 127.0.0.1:4943
-	sleep 5
-	dfx deploy internet_identity || echo "Warning: Internet Identity deployment failed"
+	sleep 1
 	dfx deploy backend
 	dfx generate backend
 	npm install && npm start
@@ -40,8 +39,7 @@ redeploy:
 	dfx stop 2>/dev/null || true
 	rm -rf .dfx/state 2>/dev/null || true
 	dfx start --background --host 127.0.0.1:4943
-	sleep 5
-	dfx deploy internet_identity
+	sleep 1
 	dfx deploy backend
 	dfx generate backend
 	npm start
@@ -89,8 +87,7 @@ topup_backend:
 
 # Code Quality
 frontend-format:
-	yarn run lint
-	prettier --write ./src/frontend
+	npm run format
 	npx tsc --noUnusedLocals --noUnusedParameters --noEmit --skipLibCheck
 	npx ts-unused-exports tsconfig.json || true
 
@@ -100,7 +97,7 @@ pretty:
 
 backend-format:
 	cargo fmt
-	cargo clippy --fix
+	cargo clippy --fix --allow-dirty --allow-staged
 
 code_review:
 	git diff HEAD~1 HEAD -- src/frontend

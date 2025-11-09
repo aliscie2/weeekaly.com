@@ -1,6 +1,7 @@
 # 📚 Lessons Learned - Critical Mistakes to Avoid
 
 ## Overview
+
 Critical mistakes encountered during development and how to avoid them. This document consolidates known issues, regressions, and important lessons.
 
 ---
@@ -12,18 +13,20 @@ Critical mistakes encountered during development and how to avoid them. This doc
 **Root Cause:** React Query cache, localStorage, sessionStorage, and IndexedDB all persisted.
 
 **Solution:**
+
 ```typescript
 // On logout - clear EVERYTHING
 queryClient.clear();
 queryClient.removeQueries();
 localStorage.clear();
 sessionStorage.clear();
-window.indexedDB.databases().then(dbs => 
-  dbs.forEach(db => window.indexedDB.deleteDatabase(db.name))
-);
+window.indexedDB
+  .databases()
+  .then((dbs) => dbs.forEach((db) => window.indexedDB.deleteDatabase(db.name)));
 ```
 
 **Prevention:**
+
 - ✅ Clear ALL storage on logout (not just one key)
 - ✅ Use `staleTime: 0, gcTime: 0` for user-specific data
 - ✅ Implement account change detection
@@ -40,6 +43,7 @@ window.indexedDB.databases().then(dbs =>
 **Truth:** Google Calendar API already returns events in browser timezone.
 
 **Wrong:**
+
 ```typescript
 const dayStart = new Date(day.date);
 dayStart.setHours(0, 0, 0, 0);
@@ -47,13 +51,17 @@ return eventStart >= dayStart; // ❌ Comparing timestamps
 ```
 
 **Right:**
+
 ```typescript
-return eventStart.getFullYear() === day.date.getFullYear() &&
-       eventStart.getMonth() === day.date.getMonth() &&
-       eventStart.getDate() === day.date.getDate(); // ✅ Compare components
+return (
+  eventStart.getFullYear() === day.date.getFullYear() &&
+  eventStart.getMonth() === day.date.getMonth() &&
+  eventStart.getDate() === day.date.getDate()
+); // ✅ Compare components
 ```
 
 **Prevention:**
+
 - ✅ Trust browser timezone handling
 - ✅ Compare date components, not timestamps
 - ✅ Log timezone info when debugging
@@ -68,17 +76,20 @@ return eventStart.getFullYear() === day.date.getFullYear() &&
 **Solution:** Single source of truth - ALL events from Google Calendar only.
 
 **Wrong:**
+
 ```typescript
 const [localEvents, setLocalEvents] = useState([]);
 const events = [...localEvents, ...calendarEvents]; // ❌ Two sources
 ```
 
 **Right:**
+
 ```typescript
 const events = convertGoogleEventsToAvailabilityEvents(); // ✅ One source
 ```
 
 **Prevention:**
+
 - ✅ Single source of truth for data
 - ✅ No temporary/local state for persistent data
 - ✅ Save to backend immediately (with confirmation)
@@ -91,6 +102,7 @@ const events = convertGoogleEventsToAvailabilityEvents(); // ✅ One source
 **Problem:** Hundreds of logs making debugging impossible.
 
 **Wrong:**
+
 ```typescript
 events.forEach(e => {
   console.log('Processing:', e); // ❌ Logs 50+ times
@@ -99,12 +111,14 @@ events.forEach(e => {
 ```
 
 **Right:**
+
 ```typescript
 console.log(`📅 Viewing week: ${start} - ${end} | Total: ${events.length}`);
 console.log(`📊 Showing ${visible} of ${total} events`);
 ```
 
 **Prevention:**
+
 - ✅ Log summaries, not individual items
 - ✅ Use emojis for visual scanning
 - ✅ Remove debug logs before commit
@@ -117,11 +131,13 @@ console.log(`📊 Showing ${visible} of ${total} events`);
 **Problem:** Stale data served even after logout.
 
 **Misunderstanding:**
+
 - `staleTime: 2 minutes` = Data considered fresh for 2 minutes
 - `gcTime: 5 minutes` = Data stays in memory for 5 minutes
 - Cache survives logout!
 
 **Solution for user-specific data:**
+
 ```typescript
 {
   staleTime: 0,    // Always fetch fresh
@@ -131,6 +147,7 @@ console.log(`📊 Showing ${visible} of ${total} events`);
 ```
 
 **Prevention:**
+
 - ✅ Zero-cache for user-specific data
 - ✅ Understand staleTime vs gcTime
 - ✅ Clear cache on logout
@@ -140,35 +157,34 @@ console.log(`📊 Showing ${visible} of ${total} events`);
 
 ## Quick Reference: Common Pitfalls
 
-| Issue | ❌ Wrong | ✅ Right |
-|-------|---------|---------|
-| **Logout** | Clear one key | Clear ALL storage |
-| **Timezone** | Manual conversion | Compare date components |
-| **Events** | Local + Calendar | Calendar only |
-| **Cache** | Long staleTime | Zero-cache for user data |
-| **Logging** | Log in loops | Log summaries only |
+| Issue        | ❌ Wrong          | ✅ Right                 |
+| ------------ | ----------------- | ------------------------ |
+| **Logout**   | Clear one key     | Clear ALL storage        |
+| **Timezone** | Manual conversion | Compare date components  |
+| **Events**   | Local + Calendar  | Calendar only            |
+| **Cache**    | Long staleTime    | Zero-cache for user data |
+| **Logging**  | Log in loops      | Log summaries only       |
 
 ---
-
-
-
-
 
 ## 6. Calendar Grid Spacing and Borders ⚠️
 
 **Problem:** Excessive spacing between day columns with individual borders/outlines that made each day look separate.
 
 **Wrong:**
+
 ```typescript
 <div className="gap-1 md:gap-2 rounded-2xl border"> // ❌ Too much spacing
 ```
 
 **Right:**
+
 ```typescript
 <div className="border-r border-[#d4cfbe]/30"> // ✅ Subtle vertical dividers only
 ```
 
 **Prevention:**
+
 - ✅ Remove gaps between calendar columns
 - ✅ Use vertical dividers only (not borders around each day)
 - ✅ Calendar should feel like one unified component
@@ -181,6 +197,7 @@ console.log(`📊 Showing ${visible} of ${total} events`);
 **Problem:** Events created from Availability Page appeared at wrong date/time in Google Calendar.
 
 **Critical Requirements:**
+
 1. Get correct day from `weekData[dayIndex]` - this has the actual date
 2. Get time slot start time (e.g., "9:00 AM") from `day.timeSlots[0].start`
 3. Add offset minutes from drag position to base time
@@ -188,6 +205,7 @@ console.log(`📊 Showing ${visible} of ${total} events`);
 5. Convert to Google Calendar format with timezone
 
 **Prevention:**
+
 - ✅ Always log date/time calculations for debugging
 - ✅ Verify in Google Calendar web UI that event appears at correct date/time
 - ✅ Test with different days and time slots
@@ -200,6 +218,7 @@ console.log(`📊 Showing ${visible} of ${total} events`);
 **Problem:** React's synthetic touch events are passive by default, so `preventDefault()` doesn't work to prevent scrolling during drag.
 
 **Wrong:**
+
 ```typescript
 const handleTouchMove = (e: React.TouchEvent) => {
   e.preventDefault(); // ❌ Doesn't work - passive by default
@@ -207,6 +226,7 @@ const handleTouchMove = (e: React.TouchEvent) => {
 ```
 
 **Right:**
+
 ```typescript
 useEffect(() => {
   const handleTouchMoveNative = (e: TouchEvent) => {
@@ -214,14 +234,17 @@ useEffect(() => {
       e.preventDefault(); // ✅ Works with passive: false
     }
   };
-  
-  element.addEventListener('touchmove', handleTouchMoveNative, { passive: false });
-  
-  return () => element.removeEventListener('touchmove', handleTouchMoveNative);
+
+  element.addEventListener("touchmove", handleTouchMoveNative, {
+    passive: false,
+  });
+
+  return () => element.removeEventListener("touchmove", handleTouchMoveNative);
 }, [isDragging]);
 ```
 
 **Prevention:**
+
 - ✅ Use native event listeners with `passive: false` for scroll prevention
 - ✅ Keep React synthetic events for touch detection and calculations
 - ✅ Only prevent scroll when actively dragging
@@ -234,6 +257,7 @@ useEffect(() => {
 **Problem:** Previous/Today/Next buttons don't update the displayed week because each availability has static `weekData`.
 
 **Wrong:**
+
 ```typescript
 interface Availability {
   weekData: DayAvailability[]; // ❌ Static data
@@ -241,6 +265,7 @@ interface Availability {
 ```
 
 **Right:**
+
 ```typescript
 interface Availability {
   currentStartDate: Date; // ✅ Track current view date
@@ -249,6 +274,7 @@ interface Availability {
 ```
 
 **Prevention:**
+
 - ✅ Don't store computed/derived data in state
 - ✅ Compute data on demand based on current date
 - ✅ Always test navigation immediately after implementing calendar features
@@ -261,11 +287,13 @@ interface Availability {
 **Problem:** Mobile version should show 2 days at a time with swipe/pagination, but shows static 2-column grid.
 
 **Solution Needed:**
+
 - Implement proper mobile pagination showing only 2 days at a time
 - Add swipe gestures or ensure arrow navigation works for 2-day increments
 - Make sure the 2 visible days update when navigating
 
 **Prevention:**
+
 - ✅ Test mobile responsive behavior separately
 - ✅ Ensure pagination controls work on mobile
 - ✅ Test swipe gestures on real devices
@@ -277,21 +305,25 @@ interface Availability {
 ### Fixed Issues (11/9/2025)
 
 #### ✅ Availability Page Now Shows Calendar Events
+
 - **Issue:** AvailabilityPage was not displaying Google Calendar events
 - **Solution:** Added `useCalendarEvents()` hook and event conversion
 - **Visual Design:** Blue calendar events (read-only) vs colored local events (editable)
 
 #### ✅ Calendar Grid Spacing
+
 - **Issue:** Excessive spacing between day columns
 - **Solution:** Removed gaps, added subtle vertical dividers only
 
 ### Current Issues
 
 #### ⚠️ Calendar Navigation Not Working
+
 - Previous/Today/Next buttons don't update displayed week
 - Each availability has static `weekData` instead of dynamic generation
 
 #### ⚠️ Mobile Pagination Missing
+
 - Mobile shows static 2-column grid instead of paginated 2-day view
 - No swipe functionality
 
@@ -300,6 +332,7 @@ interface Availability {
 ## Architecture Notes
 
 ### Google Calendar Event Structure
+
 ```typescript
 {
   id: string;
@@ -313,11 +346,10 @@ interface Availability {
 ```
 
 ### Data Flow
+
 ```
-User Action → useEventActions Hook → React Query Mutation → 
+User Action → useEventActions Hook → React Query Mutation →
 Google Calendar API → Cache Invalidation → UI Auto-updates
 ```
 
 ---
-
-

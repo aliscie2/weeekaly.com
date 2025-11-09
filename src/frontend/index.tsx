@@ -1,6 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query';
+import {
+  QueryClient,
+  QueryClientProvider,
+  QueryCache,
+  MutationCache,
+} from "@tanstack/react-query";
 import App from "./App";
 import "./index.css";
 
@@ -13,7 +18,7 @@ const queryClient = new QueryClient({
     onError: (error, query) => {
       // Only log errors in development
       if (isDevelopment) {
-        console.error('🔴 [React Query] Query Error:', {
+        console.error("🔴 [React Query] Query Error:", {
           queryKey: query.queryKey,
           error,
           timestamp: new Date().toISOString(),
@@ -22,13 +27,12 @@ const queryClient = new QueryClient({
     },
   }),
   mutationCache: new MutationCache({
-    onError: (error, variables, context, mutation) => {
+    onError: (error, _variables, _context, mutation) => {
       // Only log errors in development
       if (isDevelopment) {
-        console.error('🔴 [React Query] Mutation Error:', {
+        console.error("🔴 [React Query] Mutation Error:", {
           mutationKey: mutation.options.mutationKey,
           error,
-          variables,
           timestamp: new Date().toISOString(),
         });
       }

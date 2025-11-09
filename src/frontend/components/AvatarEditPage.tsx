@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { motion } from 'motion/react';
-import { Button } from './ui/button';
-import { Label } from './ui/label';
-import { Slider } from './ui/slider';
-import { ArrowLeft, ZoomIn, ZoomOut } from 'lucide-react';
-import Cropper from 'react-easy-crop';
+import { useState } from "react";
+import { motion } from "motion/react";
+import { Button } from "./ui/button";
+import { Label } from "./ui/label";
+import { Slider } from "./ui/slider";
+import { ArrowLeft, ZoomIn, ZoomOut } from "lucide-react";
+import Cropper from "react-easy-crop";
 
 interface AvatarEditPageProps {
   imageSrc: string;
@@ -12,12 +12,16 @@ interface AvatarEditPageProps {
   onBack: () => void;
 }
 
-export function AvatarEditPage({ imageSrc, onSave, onBack }: AvatarEditPageProps) {
+export function AvatarEditPage({
+  imageSrc,
+  onSave,
+  onBack,
+}: AvatarEditPageProps) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
 
-  const onCropComplete = (croppedArea: any, croppedAreaPixels: any) => {
+  const onCropComplete = (_croppedArea: any, croppedAreaPixels: any) => {
     setCroppedAreaPixels(croppedAreaPixels);
   };
 
