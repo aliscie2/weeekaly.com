@@ -31,40 +31,53 @@ Open http://localhost:5173
 
 ## 📚 Documentation
 
-### Main Guides
-- **[OPTIMIZATION_GUIDE.md](./OPTIMIZATION_GUIDE.md)** - Security fixes, performance improvements, and implementation guide
+### For Users
+- **[QUICK_START_GUIDE.md](./QUICK_START_GUIDE.md)** - How to use the app
+- **[VISUAL_GUIDE.md](./VISUAL_GUIDE.md)** - Visual design and UI patterns
 
-### Quick Reference
-- **Build:** `dfx build backend && dfx deploy`
-- **Test:** `cargo test` (backend) or `npm test` (frontend)
-- **Format:** `npm run format`
+### For Developers
+- **[IMPLEMENTATION.md](./IMPLEMENTATION.md)** - Complete implementation guide
+- **[CODE_QUALITY_IMPROVEMENTS.md](./CODE_QUALITY_IMPROVEMENTS.md)** - Performance & type safety improvements
+- **[LESSONS_LEARNED.md](./LESSONS_LEARNED.md)** - Critical mistakes and how to avoid them
+- **[TESTING.md](./TESTING.md)** - Testing checklist
 
----
+### Quick Commands
+```bash
+# Build and deploy
+dfx build backend && dfx deploy
 
-## 🔒 Security Status
+# Run tests
+cargo test  # Backend
+npm test    # Frontend
 
-### ✅ Phase 1 Complete (Nov 6, 2025)
-- Client secret removed from frontend
-- Secure token exchange via backend
-- 96% reduction in API calls
-- Improved code quality
-
-### ⚠️ Phase 2 Required (Before Production)
-- JWT signature verification
-- Threshold ECDSA delegation signing
-- Token encryption at rest
-
-**See [OPTIMIZATION_GUIDE.md](./OPTIMIZATION_GUIDE.md) for details.**
+# Format code
+npm run format
+```
 
 ---
 
-## 📊 Performance
+## ✨ Features
 
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| API Calls/Hour | 120 | 12 | 96% ↓ |
-| Polling Interval | 30s | 5min | 10x slower |
-| Background Polling | Yes | No | Battery savings |
+### Calendar Management
+- **Availability Page** - Drag-to-create events, resize handles, drag-to-reschedule
+- **Events Page** - Full CRUD operations (Create, Read, Update, Delete)
+- **Google Calendar Integration** - Real-time sync with 5-minute polling
+- **Mobile Touch Support** - Long-press to create, touch drag, resize handles
+- **Smart Cache Management** - Automatic account switching detection
+
+### Key Capabilities
+- ✅ Drag-to-create events with auto-generated names
+- ✅ Resize events with top/bottom handles
+- ✅ Drag-to-reschedule with live preview
+- ✅ Overlap prevention and validation
+- ✅ Past event protection
+- ✅ Google Meet integration (auto-enabled)
+- ✅ Mobile-optimized touch interactions
+- ✅ Account switching with cache cleanup
+
+**See [IMPLEMENTATION.md](./IMPLEMENTATION.md) for complete feature details.**
+
+---
 
 ---
 
@@ -120,21 +133,14 @@ dfx canister --network ic status backend
 
 ## 🐛 Troubleshooting
 
-### TypeScript Errors
-```bash
-# Rebuild backend to regenerate types
-dfx build backend
-```
+### Common Issues
+- **Events not loading?** Check browser console, verify login, ensure Google Calendar API is enabled
+- **Wrong date/time?** Check console logs for date calculation, verify timezone
+- **Form not submitting?** Check for validation errors, ensure title is filled
+- **TypeScript errors?** Rebuild backend: `dfx build backend`
+- **OAuth issues?** Check `GOOGLE_CLIENT_SECRET`, verify redirect URI, check logs: `dfx canister logs backend`
 
-### OAuth Issues
-1. Check `GOOGLE_CLIENT_SECRET` in `src/backend/src/lib.rs`
-2. Verify redirect URI in Google Cloud Console
-3. Check logs: `dfx canister logs backend`
-
-### Calendar Not Loading
-1. Check browser console for errors
-2. Verify access token in localStorage
-3. Check Network tab for failed API calls
+**See [QUICK_START_GUIDE.md](./QUICK_START_GUIDE.md) for detailed troubleshooting.**
 
 ---
 
@@ -177,13 +183,15 @@ weekaly.com/
 
 ## 🤝 Contributing
 
-1. Read [OPTIMIZATION_GUIDE.md](./OPTIMIZATION_GUIDE.md)
+1. Read [IMPLEMENTATION.md](./IMPLEMENTATION.md) and [LESSONS_LEARNED.md](./LESSONS_LEARNED.md)
 2. Create a feature branch
 3. Make your changes
-4. Run tests and format code
-5. Submit a pull request
+4. Run tests: `npm test` and `cargo test`
+5. Format code: `npm run format`
+6. Check [TESTING.md](./TESTING.md) for testing guidelines
+7. Submit a pull request
 
 ---
 
-**Status:** Phase 1 Complete ✅ | Phase 2 Required ⚠️  
-**Last Updated:** November 6, 2025
+**Status:** Production Ready ✅  
+**Last Updated:** November 9, 2025

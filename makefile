@@ -141,4 +141,12 @@ upgrade-backend:
 	dfx deploy backend
 	gzip -fk target/wasm32-unknown-unknown/release/backend.wasm
 	mv target/wasm32-unknown-unknown/release/backend.wasm.gz ./tests/backend/
- 
+
+reinstall:
+	dfx canister install backend --mode reinstall --yes
+
+
+
+testing_thumbnails:
+	cloudflared tunnel --url http://localhost:5173
+# 	addd this in in server: in  vite.config.ts allowedHosts: [ ".trycloudflare.com"],

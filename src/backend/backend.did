@@ -1,3 +1,13 @@
+type CreateEventRequest = record {
+  timezone : text;
+  description : opt text;
+  end_time : text;
+  summary : text;
+  start_time : text;
+  attendees : opt vec text;
+  conference_data : opt bool;
+  location : opt text;
+};
 type Delegation = record {
   pubkey : blob;
   targets : opt vec principal;
@@ -37,16 +47,28 @@ type PrepareDelegationRequest = record {
 };
 type PrepareDelegationResponse = record { expire_at : nat64 };
 type RefreshTokenRequest = record { refresh_token : text };
-type Result = variant { Ok : TokenResponse; Err : text };
-type Result_1 = variant { Ok : GetDelegationResponse; Err : text };
-type Result_2 = variant { Ok; Err : text };
-type Result_3 = variant { Ok : PrepareDelegationResponse; Err : text };
+type Result = variant { Ok : text; Err : text };
+type Result_1 = variant { Ok; Err : text };
+type Result_2 = variant { Ok : TokenResponse; Err : text };
+type Result_3 = variant { Ok : GetDelegationResponse; Err : text };
+type Result_4 = variant { Ok : PrepareDelegationResponse; Err : text };
 type SignedDelegation = record { signature : blob; delegation : Delegation };
 type TokenResponse = record {
   access_token : text;
   refresh_token : opt text;
   expires_in : nat64;
   token_type : text;
+};
+type UpdateEventRequest = record {
+  status : opt text;
+  timezone : opt text;
+  description : opt text;
+  end_time : opt text;
+  summary : opt text;
+  start_time : opt text;
+  attendees : opt vec text;
+  event_id : text;
+  location : opt text;
 };
 type UserInfo = record {
   "principal" : text;
@@ -56,16 +78,19 @@ type UserInfo = record {
 };
 service : () -> {
   cleanup_expired_sessions : () -> (nat64);
-  exchange_oauth_code : (ExchangeCodeRequest) -> (Result);
+  create_calendar_event : (CreateEventRequest) -> (Result);
+  delete_calendar_event : (text) -> (Result_1);
+  exchange_oauth_code : (ExchangeCodeRequest) -> (Result_2);
   get_caller : () -> (text) query;
-  get_delegation : (GetDelegationRequest) -> (Result_1) query;
+  get_delegation : (GetDelegationRequest) -> (Result_3) query;
   get_providers : () -> (vec OAuthProvider) query;
   get_session_count : () -> (nat64) query;
   get_user_info : () -> (UserInfo) query;
   greet : (text) -> (text) query;
   hello_world : () -> (text) query;
   is_authenticated : () -> (bool) query;
-  logout : (blob) -> (Result_2);
-  prepare_delegation : (PrepareDelegationRequest) -> (Result_3);
-  refresh_google_token : (RefreshTokenRequest) -> (Result);
+  logout : (blob) -> (Result_1);
+  prepare_delegation : (PrepareDelegationRequest) -> (Result_4);
+  refresh_google_token : (RefreshTokenRequest) -> (Result_2);
+  update_calendar_event : (UpdateEventRequest) -> (Result);
 }

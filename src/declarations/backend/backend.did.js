@@ -1,4 +1,16 @@
 export const idlFactory = ({ IDL }) => {
+  const CreateEventRequest = IDL.Record({
+    'timezone' : IDL.Text,
+    'description' : IDL.Opt(IDL.Text),
+    'end_time' : IDL.Text,
+    'summary' : IDL.Text,
+    'start_time' : IDL.Text,
+    'attendees' : IDL.Opt(IDL.Vec(IDL.Text)),
+    'conference_data' : IDL.Opt(IDL.Bool),
+    'location' : IDL.Opt(IDL.Text),
+  });
+  const Result = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
+  const Result_1 = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text });
   const ExchangeCodeRequest = IDL.Record({
     'code_verifier' : IDL.Text,
     'redirect_uri' : IDL.Text,
@@ -10,7 +22,7 @@ export const idlFactory = ({ IDL }) => {
     'expires_in' : IDL.Nat64,
     'token_type' : IDL.Text,
   });
-  const Result = IDL.Variant({ 'Ok' : TokenResponse, 'Err' : IDL.Text });
+  const Result_2 = IDL.Variant({ 'Ok' : TokenResponse, 'Err' : IDL.Text });
   const GetDelegationRequest = IDL.Record({
     'expire_at' : IDL.Nat64,
     'provider' : IDL.Text,
@@ -31,7 +43,7 @@ export const idlFactory = ({ IDL }) => {
     'signed_delegation' : SignedDelegation,
     'user_canister_pubkey' : IDL.Vec(IDL.Nat8),
   });
-  const Result_1 = IDL.Variant({
+  const Result_3 = IDL.Variant({
     'Ok' : GetDelegationResponse,
     'Err' : IDL.Text,
   });
@@ -49,7 +61,6 @@ export const idlFactory = ({ IDL }) => {
     'user_id' : IDL.Opt(IDL.Text),
     'email' : IDL.Opt(IDL.Text),
   });
-  const Result_2 = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text });
   const PrepareDelegationRequest = IDL.Record({
     'provider' : IDL.Text,
     'origin' : IDL.Text,
@@ -59,25 +70,39 @@ export const idlFactory = ({ IDL }) => {
     'id_token' : IDL.Text,
   });
   const PrepareDelegationResponse = IDL.Record({ 'expire_at' : IDL.Nat64 });
-  const Result_3 = IDL.Variant({
+  const Result_4 = IDL.Variant({
     'Ok' : PrepareDelegationResponse,
     'Err' : IDL.Text,
   });
   const RefreshTokenRequest = IDL.Record({ 'refresh_token' : IDL.Text });
+  const UpdateEventRequest = IDL.Record({
+    'status' : IDL.Opt(IDL.Text),
+    'timezone' : IDL.Opt(IDL.Text),
+    'description' : IDL.Opt(IDL.Text),
+    'end_time' : IDL.Opt(IDL.Text),
+    'summary' : IDL.Opt(IDL.Text),
+    'start_time' : IDL.Opt(IDL.Text),
+    'attendees' : IDL.Opt(IDL.Vec(IDL.Text)),
+    'event_id' : IDL.Text,
+    'location' : IDL.Opt(IDL.Text),
+  });
   return IDL.Service({
     'cleanup_expired_sessions' : IDL.Func([], [IDL.Nat64], []),
-    'exchange_oauth_code' : IDL.Func([ExchangeCodeRequest], [Result], []),
+    'create_calendar_event' : IDL.Func([CreateEventRequest], [Result], []),
+    'delete_calendar_event' : IDL.Func([IDL.Text], [Result_1], []),
+    'exchange_oauth_code' : IDL.Func([ExchangeCodeRequest], [Result_2], []),
     'get_caller' : IDL.Func([], [IDL.Text], ['query']),
-    'get_delegation' : IDL.Func([GetDelegationRequest], [Result_1], ['query']),
+    'get_delegation' : IDL.Func([GetDelegationRequest], [Result_3], ['query']),
     'get_providers' : IDL.Func([], [IDL.Vec(OAuthProvider)], ['query']),
     'get_session_count' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_user_info' : IDL.Func([], [UserInfo], ['query']),
     'greet' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
     'hello_world' : IDL.Func([], [IDL.Text], ['query']),
     'is_authenticated' : IDL.Func([], [IDL.Bool], ['query']),
-    'logout' : IDL.Func([IDL.Vec(IDL.Nat8)], [Result_2], []),
-    'prepare_delegation' : IDL.Func([PrepareDelegationRequest], [Result_3], []),
-    'refresh_google_token' : IDL.Func([RefreshTokenRequest], [Result], []),
+    'logout' : IDL.Func([IDL.Vec(IDL.Nat8)], [Result_1], []),
+    'prepare_delegation' : IDL.Func([PrepareDelegationRequest], [Result_4], []),
+    'refresh_google_token' : IDL.Func([RefreshTokenRequest], [Result_2], []),
+    'update_calendar_event' : IDL.Func([UpdateEventRequest], [Result], []),
   });
 };
 export const init = ({ IDL }) => { return []; };
