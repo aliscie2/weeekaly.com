@@ -464,6 +464,305 @@ async fn refresh_google_token(req: RefreshTokenRequest) -> Result<TokenResponse,
 }
 
 // ============================================================================
+// Google Calendar CRUD Operations
+// ============================================================================
+
+#[derive(CandidType, Deserialize)]
+pub struct CreateEventRequest {
+    pub summary: String,
+    pub description: Option<String>,
+    pub start_time: String, // ISO 8601 format
+    pub end_time: String,   // ISO 8601 format
+    pub timezone: String,
+    pub location: Option<String>,
+    pub attendees: Option<Vec<String>>, // Email addresses
+    pub conference_data: Option<bool>,  // Add Google Meet
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct UpdateEventRequest {
+    pub event_id: String,
+    pub summary: Option<String>,
+    pub description: Option<String>,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub timezone: Option<String>,
+    pub location: Option<String>,
+    pub attendees: Option<Vec<String>>,
+    pub status: Option<String>, // "confirmed", "tentative", "cancelled"
+}
+
+#[derive(CandidType, Serialize)]
+pub struct CalendarEvent {
+    pub id: String,
+    pub summary: String,
+    pub description: Option<String>,
+    pub start: String,
+    pub end: String,
+    pub location: Option<String>,
+    pub status: String,
+}
+
+/// Create a new calendar event
+#[update]
+async fn create_calendar_event(req: CreateEventRequest) -> Result<String, String> {
+    ic_cdk::println!("📅 [Backend] Creating calendar event: {}", req.summary);
+    
+    // Get user's access token
+    let caller = ic_cdk::caller().to_text();
+    let token = USER_TOKENS.with(|t| {
+        t.borrow().get(&caller).map(|tr| tr.access_token.clone())
+    }).ok_or("No access token found. Please login first.")?;
+    
+    // Build event JSON
+    let mut event_json = serde_json::json!({
+        "summary": req.summary,
+        "start": {
+            "dateTime": req.start_time,
+            "timeZone": req.timezone
+        },
+        "end": {
+            "dateTime": req.end_time,
+            "timeZone": req.timezone
+        }
+    });
+    
+    if let Some(desc) = req.description {
+        event_json["description"] = serde_json::json!(desc);
+    }
+    
+    if let Some(loc) = req.location {
+        event_json["location"] = serde_json::json!(loc);
+    }
+    
+    if let Some(attendees) = req.attendees {
+        let attendee_list: Vec<serde_json::Value> = attendees.iter()
+            .map(|email| serde_json::json!({"email": email}))
+            .collect();
+        event_json["attendees"] = serde_json::json!(attendee_list);
+    }
+    
+    if req.conference_data.unwrap_or(false) {
+        event_json["conferenceData"] = serde_json::json!({
+            "createRequest": {
+                "requestId": format!("meet-{}", ic_cdk::api::time()),
+                "conferenceSolutionKey": {"type": "hangoutsMeet"}
+            }
+        });
+    }
+    
+    let body = serde_json::to_string(&event_json)
+        .map_err(|e| format!("Failed to serialize event: {}", e))?;
+    
+    // Determine URL based on conference data
+    let url = if req.conference_data.unwrap_or(false) {
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1"
+    } else {
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+    };
+    
+    let request = ic_cdk::api::management_canister::http_request::CanisterHttpRequestArgument {
+        url: url.to_string(),
+        method: ic_cdk::api::management_canister::http_request::HttpMethod::POST,
+        body: Some(body.into_bytes()),
+        max_response_bytes: Some(8192),
+        transform: None,
+        headers: vec![
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "Authorization".to_string(),
+                value: format!("Bearer {}", token),
+            },
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "Content-Type".to_string(),
+                value: "application/json".to_string(),
+            },
+        ],
+    };
+    
+    match ic_cdk::api::management_canister::http_request::http_request(request, 25_000_000_000).await {
+        Ok((response,)) => {
+            if response.status != candid::Nat::from(200u8) {
+                let error_body = String::from_utf8_lossy(&response.body);
+                ic_cdk::println!("❌ [Backend] Create event failed: {}", error_body);
+                return Err(format!("Failed to create event: {}", error_body));
+            }
+            
+            let response_json: serde_json::Value = serde_json::from_slice(&response.body)
+                .map_err(|e| format!("Failed to parse response: {}", e))?;
+            
+            let event_id = response_json["id"].as_str()
+                .ok_or("No event ID in response")?
+                .to_string();
+            
+            ic_cdk::println!("✅ [Backend] Event created: {}", event_id);
+            Ok(event_id)
+        }
+        Err((code, msg)) => {
+            ic_cdk::println!("❌ [Backend] HTTP request failed: {:?} - {}", code, msg);
+            Err(format!("HTTP request failed: {:?} - {}", code, msg))
+        }
+    }
+}
+
+/// Update an existing calendar event
+#[update]
+async fn update_calendar_event(req: UpdateEventRequest) -> Result<String, String> {
+    ic_cdk::println!("📝 [Backend] Updating calendar event: {}", req.event_id);
+    
+    // Get user's access token
+    let caller = ic_cdk::caller().to_text();
+    let token = USER_TOKENS.with(|t| {
+        t.borrow().get(&caller).map(|tr| tr.access_token.clone())
+    }).ok_or("No access token found. Please login first.")?;
+    
+    // Build update JSON (only include fields that are being updated)
+    let mut update_json = serde_json::json!({});
+    
+    if let Some(summary) = req.summary {
+        update_json["summary"] = serde_json::json!(summary);
+    }
+    
+    if let Some(desc) = req.description {
+        update_json["description"] = serde_json::json!(desc);
+    }
+    
+    if let Some(loc) = req.location {
+        update_json["location"] = serde_json::json!(loc);
+    }
+    
+    if let Some(status) = req.status {
+        update_json["status"] = serde_json::json!(status);
+    }
+    
+    if let Some(start_time) = req.start_time {
+        let timezone = req.timezone.clone().unwrap_or_else(|| "UTC".to_string());
+        update_json["start"] = serde_json::json!({
+            "dateTime": start_time,
+            "timeZone": timezone
+        });
+    }
+    
+    if let Some(end_time) = req.end_time {
+        let timezone = req.timezone.unwrap_or_else(|| "UTC".to_string());
+        update_json["end"] = serde_json::json!({
+            "dateTime": end_time,
+            "timeZone": timezone
+        });
+    }
+    
+    if let Some(attendees) = req.attendees {
+        let attendee_list: Vec<serde_json::Value> = attendees.iter()
+            .map(|email| serde_json::json!({"email": email}))
+            .collect();
+        update_json["attendees"] = serde_json::json!(attendee_list);
+    }
+    
+    let body = serde_json::to_string(&update_json)
+        .map_err(|e| format!("Failed to serialize update: {}", e))?;
+    
+    let url = format!(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events/{}",
+        urlencoding::encode(&req.event_id)
+    );
+    
+    // IC HTTP outcall only supports GET, POST, HEAD
+    // Use POST with X-HTTP-Method-Override header for PATCH
+    let request = ic_cdk::api::management_canister::http_request::CanisterHttpRequestArgument {
+        url,
+        method: ic_cdk::api::management_canister::http_request::HttpMethod::POST,
+        body: Some(body.into_bytes()),
+        max_response_bytes: Some(8192),
+        transform: None,
+        headers: vec![
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "Authorization".to_string(),
+                value: format!("Bearer {}", token),
+            },
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "Content-Type".to_string(),
+                value: "application/json".to_string(),
+            },
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "X-HTTP-Method-Override".to_string(),
+                value: "PATCH".to_string(),
+            },
+        ],
+    };
+    
+    match ic_cdk::api::management_canister::http_request::http_request(request, 25_000_000_000).await {
+        Ok((response,)) => {
+            if response.status != candid::Nat::from(200u8) {
+                let error_body = String::from_utf8_lossy(&response.body);
+                ic_cdk::println!("❌ [Backend] Update event failed: {}", error_body);
+                return Err(format!("Failed to update event: {}", error_body));
+            }
+            
+            ic_cdk::println!("✅ [Backend] Event updated: {}", req.event_id);
+            Ok(req.event_id)
+        }
+        Err((code, msg)) => {
+            ic_cdk::println!("❌ [Backend] HTTP request failed: {:?} - {}", code, msg);
+            Err(format!("HTTP request failed: {:?} - {}", code, msg))
+        }
+    }
+}
+
+/// Delete a calendar event
+#[update]
+async fn delete_calendar_event(event_id: String) -> Result<(), String> {
+    ic_cdk::println!("🗑️ [Backend] Deleting calendar event: {}", event_id);
+    
+    // Get user's access token
+    let caller = ic_cdk::caller().to_text();
+    let token = USER_TOKENS.with(|t| {
+        t.borrow().get(&caller).map(|tr| tr.access_token.clone())
+    }).ok_or("No access token found. Please login first.")?;
+    
+    let url = format!(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events/{}",
+        urlencoding::encode(&event_id)
+    );
+    
+    // IC HTTP outcall only supports GET, POST, HEAD
+    // Use POST with X-HTTP-Method-Override header for DELETE
+    let request = ic_cdk::api::management_canister::http_request::CanisterHttpRequestArgument {
+        url,
+        method: ic_cdk::api::management_canister::http_request::HttpMethod::POST,
+        body: None,
+        max_response_bytes: Some(1024),
+        transform: None,
+        headers: vec![
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "Authorization".to_string(),
+                value: format!("Bearer {}", token),
+            },
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "X-HTTP-Method-Override".to_string(),
+                value: "DELETE".to_string(),
+            },
+        ],
+    };
+    
+    match ic_cdk::api::management_canister::http_request::http_request(request, 25_000_000_000).await {
+        Ok((response,)) => {
+            // DELETE returns 204 No Content on success
+            if response.status != candid::Nat::from(204u8) && response.status != candid::Nat::from(200u8) {
+                let error_body = String::from_utf8_lossy(&response.body);
+                ic_cdk::println!("❌ [Backend] Delete event failed: {}", error_body);
+                return Err(format!("Failed to delete event: {}", error_body));
+            }
+            
+            ic_cdk::println!("✅ [Backend] Event deleted: {}", event_id);
+            Ok(())
+        }
+        Err((code, msg)) => {
+            ic_cdk::println!("❌ [Backend] HTTP request failed: {:?} - {}", code, msg);
+            Err(format!("HTTP request failed: {:?} - {}", code, msg))
+        }
+    }
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 

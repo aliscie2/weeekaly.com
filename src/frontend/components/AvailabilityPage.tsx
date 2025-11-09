@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Button } from './ui/button';
-import { ArrowLeft, ChevronLeft, ChevronRight, Share2, Trash2, Expand } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Share2, Trash2, Expand, Save, Video, RefreshCw, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -13,6 +13,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
+import { EventFormModal } from './EventFormModal';
+import { useEventActions } from '../hooks/useEventActions';
+import { useCalendarEvents } from '../hooks/useBackend';
+import { isPastEvent, isPastDateTime, generateEventName, validateEventTime } from '../utils/dateHelpers';
 
 interface TimeSlot {
   start: string;
@@ -33,6 +37,8 @@ export interface AvailabilityEvent {
   durationMinutes: number; // Duration in minutes
   title: string;
   color: string;
+  isFromCalendar?: boolean; // True if from Google Calendar (read-only)
+  meetLink?: string; // Google Meet link if available
 }
 
 interface AvailabilityPageProps {
@@ -172,31 +178,116 @@ export function AvailabilityPage({
   const daysToShow = isMobile ? 2 : 7;
   const weekData = getDaysData(currentStartDate, daysToShow);
   
-  const [events, setEvents] = useState<AvailabilityEvent[]>([]);
+  // ALL events come from Google Calendar only (no local events)
   const [focusedEventId, setFocusedEventId] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [creatingDayIndex, setCreatingDayIndex] = useState<number | null>(null);
-  const [dragType, setDragType] = useState<'move' | 'resize-top' | 'resize-bottom' | null>(null);
-  const [dragEventId, setDragEventId] = useState<string | null>(null);
+  
+  // Fetch Google Calendar events (same hook as EventsPage!)
+  const { data: googleEvents = [], refetch: refetchEvents, isRefetching } = useCalendarEvents(true);
+  
+  // Use event actions hook for Google Calendar integration
+  const eventActions = useEventActions();
+  
+  /**
+   * Convert Google Calendar events to AvailabilityEvents for display on grid
+   * Memoized to avoid recalculating on every render
+   */
+  const convertGoogleEventsToAvailabilityEvents = useCallback((): AvailabilityEvent[] => {
+    const availabilityEvents: AvailabilityEvent[] = [];
+    
+    googleEvents.forEach((gEvent) => {
+      const eventStart = new Date(gEvent.start?.dateTime || gEvent.start?.date || '');
+      const eventEnd = new Date(gEvent.end?.dateTime || gEvent.end?.date || '');
+      
+      // Find which day in weekData this event belongs to
+      // Events come from Google Calendar already in browser timezone
+      const dayIndex = weekData.findIndex(day => {
+        // Compare year, month, and date directly (no timezone conversion)
+        const eventYear = eventStart.getFullYear();
+        const eventMonth = eventStart.getMonth();
+        const eventDate = eventStart.getDate();
+        
+        const dayYear = day.date.getFullYear();
+        const dayMonth = day.date.getMonth();
+        const dayDate = day.date.getDate();
+        
+        return eventYear === dayYear && 
+               eventMonth === dayMonth && 
+               eventDate === dayDate;
+      });
+      
+      // Only show events that fall within the current week view
+      if (dayIndex === -1) return;
+      
+      if (!weekData[dayIndex].available) return;
+      
+      const day = weekData[dayIndex];
+      if (day.timeSlots.length === 0) return;
+      
+      // Calculate startMinutes from the day's time slot start
+      const timeSlotStart = day.timeSlots[0].start;
+      const baseHour = parseTimeToHours(timeSlotStart);
+      
+      const eventHour = eventStart.getHours() + eventStart.getMinutes() / 60;
+      const startMinutes = Math.max(0, Math.round((eventHour - baseHour) * 60));
+      
+      // Calculate duration
+      const durationMs = eventEnd.getTime() - eventStart.getTime();
+      const durationMinutes = Math.round(durationMs / (1000 * 60));
+      
+      // Only show if event is within the visible time range
+      const dayTotalMinutes = calculateDuration(day.timeSlots[0]) * 60;
+      if (startMinutes >= 0 && startMinutes < dayTotalMinutes) {
+        availabilityEvents.push({
+          id: `calendar-${gEvent.id}`,
+          dayIndex,
+          startMinutes,
+          durationMinutes: Math.min(durationMinutes, dayTotalMinutes - startMinutes),
+          title: gEvent.summary || 'Untitled Event',
+          color: '#3b82f6', // Blue for calendar events
+          isFromCalendar: true,
+          meetLink: gEvent.hangoutLink,
+        });
+      }
+    });
+    
+    return availabilityEvents;
+  }, [googleEvents, weekData]);
+  
+  // ALL events come from Google Calendar only - memoized for performance
+  const events = useMemo(() => convertGoogleEventsToAvailabilityEvents(), [convertGoogleEventsToAvailabilityEvents]);
+  
+  // Drag state for creating new events
+  const [isDraggingNew, setIsDraggingNew] = useState(false);
+  const [dragDayIndex, setDragDayIndex] = useState<number | null>(null);
   const [dragStartY, setDragStartY] = useState<number>(0);
+  const [dragCurrentY, setDragCurrentY] = useState<number>(0);
   const [dragStartMinutes, setDragStartMinutes] = useState<number>(0);
-  const [dragStartDuration, setDragStartDuration] = useState<number>(0);
-  const [pendingEventData, setPendingEventData] = useState<{dayIndex: number, startMinutes: number} | null>(null);
-  const [showHoldTooltip, setShowHoldTooltip] = useState(false);
+  
+  // Drag state for rescheduling existing events
+  const [draggingEventId, setDraggingEventId] = useState<string | null>(null);
+  const [dragType, setDragType] = useState<'move' | 'resize-top' | 'resize-bottom' | null>(null);
+  const [originalEventData, setOriginalEventData] = useState<{
+    dayIndex: number;
+    startMinutes: number;
+    durationMinutes: number;
+  } | null>(null);
+  const [previewStartMinutes, setPreviewStartMinutes] = useState<number>(0);
+  const [previewDurationMinutes, setPreviewDurationMinutes] = useState<number>(0);
+  const [dragOffsetY, setDragOffsetY] = useState<number>(0);
+  
+  // UI state
   const [hoveredDayIndex, setHoveredDayIndex] = useState<number | null>(null);
   const [hoverTimeMinutes, setHoverTimeMinutes] = useState<number>(0);
-  const touchTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const tooltipHideTimerRef = useRef<NodeJS.Timeout | null>(null);
   const dayRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  const MIN_DURATION = 5; // 5 minutes
-  const MAX_DURATION = 180; // 3 hours
+  // Touch state for mobile
+  const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
+  const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number } | null>(null);
+  const [isTouchDragging, setIsTouchDragging] = useState(false);
 
-  // Generate a random color for new events
-  const getRandomColor = () => {
-    return EVENT_COLORS[Math.floor(Math.random() * EVENT_COLORS.length)];
-  };
+  const MIN_DURATION = 15; // 15 minutes minimum
+  const LONG_PRESS_DURATION = 500; // 500ms for long press
 
   // Convert pixel position to minutes
   const pixelsToMinutes = (pixels: number, containerHeight: number, totalMinutes: number) => {
@@ -224,7 +315,7 @@ export function AvailabilityPage({
   ): boolean => {
     const endMinutes = startMinutes + durationMinutes;
     
-    // Check against all events on the same day
+    // Check against ALL events on the same day
     const dayEvents = events.filter(ev => 
       ev.dayIndex === dayIndex && ev.id !== excludeEventId
     );
@@ -260,7 +351,7 @@ export function AvailabilityPage({
     setHoveredDayIndex(null);
   }, []);
 
-  // Handle creating event on desktop (click and drag)
+  // Handle drag to create new event (DESKTOP ONLY - must drag, not just click)
   const handleMouseDown = useCallback((e: React.MouseEvent, dayIndex: number) => {
     if (!weekData[dayIndex].available) return;
     
@@ -272,368 +363,714 @@ export function AvailabilityPage({
     const totalMinutes = getDayTotalMinutes(dayIndex);
     const startMinutes = Math.max(0, pixelsToMinutes(y, rect.height, totalMinutes));
     
-    // Store pending event data but don't create yet - wait for drag
-    setPendingEventData({ dayIndex, startMinutes });
-    setDragStartY(e.clientY);
-    setDragStartMinutes(startMinutes);
-    setDragStartDuration(MIN_DURATION);
-  }, [weekData]);
-
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    // Check if we have pending event data (user clicked but hasn't dragged yet)
-    if (pendingEventData && !isCreating && !dragEventId) {
-      const deltaY = Math.abs(e.clientY - dragStartY);
-      const DRAG_THRESHOLD = 5; // pixels
-      
-      // Only create event if user has dragged at least 5 pixels
-      if (deltaY >= DRAG_THRESHOLD) {
-        // Check if this would overlap with existing events
-        if (checkEventOverlap(pendingEventData.dayIndex, pendingEventData.startMinutes, MIN_DURATION)) {
-          toast.error('Cannot create overlapping events');
-          setPendingEventData(null);
-          return;
-        }
-        
-        const newEvent: AvailabilityEvent = {
-          id: `event-${Date.now()}`,
-          dayIndex: pendingEventData.dayIndex,
-          startMinutes: pendingEventData.startMinutes,
-          durationMinutes: MIN_DURATION,
-          title: 'New Event',
-          color: getRandomColor()
-        };
-        
-        setEvents(prev => [...prev, newEvent]);
-        setIsCreating(true);
-        setCreatingDayIndex(pendingEventData.dayIndex);
-        setDragEventId(newEvent.id);
-        setDragType('resize-bottom');
-        setPendingEventData(null);
-      }
+    // Check if clicking on existing event - if so, don't start drag
+    const dayEvents = events.filter(ev => ev.dayIndex === dayIndex);
+    const clickedEvent = dayEvents.find(event => {
+      const eventTop = minutesToPixels(event.startMinutes, rect.height, totalMinutes);
+      const eventBottom = eventTop + minutesToPixels(event.durationMinutes, rect.height, totalMinutes);
+      return y >= eventTop && y <= eventBottom;
+    });
+    
+    if (clickedEvent) {
+      // User clicked on event - don't start drag for new event
       return;
     }
     
-    if (!isCreating && !dragEventId) return;
+    // Start drag for new event creation
+    setIsDraggingNew(true);
+    setDragDayIndex(dayIndex);
+    setDragStartY(y);
+    setDragCurrentY(y);
+    setDragStartMinutes(startMinutes);
+  }, [weekData, events]);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    // Handle dragging new event
+    if (isDraggingNew && dragDayIndex !== null) {
+      const container = dayRefs.current[dragDayIndex];
+      if (!container) return;
+      
+      const rect = container.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      setDragCurrentY(y);
+      return;
+    }
     
-    const dayIndex = isCreating ? creatingDayIndex : 
-      events.find(ev => ev.id === dragEventId)?.dayIndex;
-    
-    if (dayIndex === null || dayIndex === undefined) return;
-    
-    const container = dayRefs.current[dayIndex];
-    if (!container) return;
-    
-    const rect = container.getBoundingClientRect();
-    const totalMinutes = getDayTotalMinutes(dayIndex);
-    
-    if (isCreating || dragType === 'resize-bottom') {
+    // Handle dragging existing event to reschedule or resize
+    if (draggingEventId && originalEventData && dragType) {
+      const container = dayRefs.current[originalEventData.dayIndex];
+      if (!container) return;
+      
+      const rect = container.getBoundingClientRect();
+      const totalMinutes = getDayTotalMinutes(originalEventData.dayIndex);
+      
+      // Calculate delta based on mouse movement
       const deltaY = e.clientY - dragStartY;
       const deltaMinutes = pixelsToMinutes(deltaY, rect.height, totalMinutes);
-      let newDuration = Math.max(MIN_DURATION, dragStartDuration + deltaMinutes);
-      newDuration = Math.min(newDuration, MAX_DURATION);
       
-      // Ensure event doesn't exceed available time
-      const event = events.find(ev => ev.id === dragEventId);
-      if (event) {
-        const maxDuration = totalMinutes - event.startMinutes;
-        newDuration = Math.min(newDuration, maxDuration);
+      if (dragType === 'move') {
+        // Move entire event
+        let newStartMinutes = originalEventData.startMinutes + deltaMinutes;
+        newStartMinutes = Math.max(0, newStartMinutes);
+        newStartMinutes = Math.min(newStartMinutes, totalMinutes - originalEventData.durationMinutes);
         
-        // Check for overlap with other events
-        if (!checkEventOverlap(dayIndex, event.startMinutes, newDuration, dragEventId)) {
-          setEvents(prev => prev.map(ev => 
-            ev.id === dragEventId ? { ...ev, durationMinutes: newDuration } : ev
-          ));
-        }
-      }
-    } else if (dragType === 'resize-top') {
-      const deltaY = e.clientY - dragStartY;
-      const deltaMinutes = pixelsToMinutes(deltaY, rect.height, totalMinutes);
-      const event = events.find(ev => ev.id === dragEventId);
-      
-      if (event) {
-        let newStartMinutes = dragStartMinutes + deltaMinutes;
-        let newDuration = dragStartDuration - deltaMinutes;
+        setPreviewStartMinutes(newStartMinutes);
+        setPreviewDurationMinutes(originalEventData.durationMinutes);
+      } else if (dragType === 'resize-top') {
+        // Resize from top (change start time)
+        let newStartMinutes = originalEventData.startMinutes + deltaMinutes;
+        let newDuration = originalEventData.durationMinutes - deltaMinutes;
         
         // Clamp values
         newStartMinutes = Math.max(0, newStartMinutes);
         newDuration = Math.max(MIN_DURATION, newDuration);
-        newDuration = Math.min(newDuration, MAX_DURATION);
         
-        // Ensure event doesn't exceed available time
-        const maxEnd = totalMinutes;
-        if (newStartMinutes + newDuration > maxEnd) {
-          newStartMinutes = maxEnd - newDuration;
+        // Ensure we don't exceed the original end time
+        const originalEndMinutes = originalEventData.startMinutes + originalEventData.durationMinutes;
+        if (newStartMinutes + newDuration > originalEndMinutes) {
+          newStartMinutes = originalEndMinutes - newDuration;
         }
         
-        // Check for overlap with other events
-        if (!checkEventOverlap(dayIndex, newStartMinutes, newDuration, dragEventId)) {
-          setEvents(prev => prev.map(ev => 
-            ev.id === dragEventId ? 
-              { ...ev, startMinutes: newStartMinutes, durationMinutes: newDuration } : ev
-          ));
-        }
-      }
-    } else if (dragType === 'move') {
-      const deltaY = e.clientY - dragStartY;
-      const deltaMinutes = pixelsToMinutes(deltaY, rect.height, totalMinutes);
-      const event = events.find(ev => ev.id === dragEventId);
-      
-      if (event) {
-        let newStartMinutes = dragStartMinutes + deltaMinutes;
-        newStartMinutes = Math.max(0, newStartMinutes);
-        newStartMinutes = Math.min(newStartMinutes, totalMinutes - event.durationMinutes);
+        setPreviewStartMinutes(newStartMinutes);
+        setPreviewDurationMinutes(newDuration);
+      } else if (dragType === 'resize-bottom') {
+        // Resize from bottom (change end time)
+        let newDuration = originalEventData.durationMinutes + deltaMinutes;
         
-        // Check for overlap with other events
-        if (!checkEventOverlap(dayIndex, newStartMinutes, event.durationMinutes, dragEventId)) {
-          setEvents(prev => prev.map(ev => 
-            ev.id === dragEventId ? { ...ev, startMinutes: newStartMinutes } : ev
-          ));
-        }
+        // Clamp values
+        newDuration = Math.max(MIN_DURATION, newDuration);
+        
+        // Ensure we don't exceed available time
+        const maxDuration = totalMinutes - originalEventData.startMinutes;
+        newDuration = Math.min(newDuration, maxDuration);
+        
+        setPreviewStartMinutes(originalEventData.startMinutes);
+        setPreviewDurationMinutes(newDuration);
       }
     }
-  }, [pendingEventData, isCreating, dragEventId, creatingDayIndex, dragType, dragStartY, dragStartMinutes, dragStartDuration, events, weekData, checkEventOverlap]);
+  }, [isDraggingNew, draggingEventId, dragDayIndex, originalEventData, dragStartY]);
 
   const handleMouseUp = useCallback(() => {
-    // If we have pending event data, user just clicked without dragging - cancel it
-    if (pendingEventData) {
-      setPendingEventData(null);
-    }
-    
-    setIsCreating(false);
-    setCreatingDayIndex(null);
-    setDragEventId(null);
-    setDragType(null);
-  }, [pendingEventData]);
-
-  // Handle creating event on mobile (tap and hold)
-  const handleTouchStart = useCallback((e: React.TouchEvent, dayIndex: number) => {
-    if (!weekData[dayIndex].available) return;
-    
-    // Prevent creating new event if one is already focused
-    if (focusedEventId) return;
-    
-    const container = dayRefs.current[dayIndex];
-    if (!container) return;
-    
-    const touch = e.touches[0];
-    const rect = container.getBoundingClientRect();
-    const y = touch.clientY - rect.top;
-    
-    // Show tooltip centered at top of screen for visibility
-    setShowHoldTooltip(true);
-    
-    touchTimerRef.current = setTimeout(() => {
-      const totalMinutes = getDayTotalMinutes(dayIndex);
-      const startMinutes = Math.max(0, pixelsToMinutes(y, rect.height, totalMinutes));
-      
-      // Check if this would overlap with existing events
-      if (checkEventOverlap(dayIndex, startMinutes, 15)) {
-        toast.error('Cannot create overlapping events');
-        // Hide tooltip after a delay
-        tooltipHideTimerRef.current = setTimeout(() => {
-          setShowHoldTooltip(false);
-        }, 1000);
+    // Handle creating new event
+    if (isDraggingNew && dragDayIndex !== null) {
+      const container = dayRefs.current[dragDayIndex];
+      if (!container) {
+        setIsDraggingNew(false);
+        setDragDayIndex(null);
         return;
       }
       
-      const newEvent: AvailabilityEvent = {
-        id: `event-${Date.now()}`,
-        dayIndex,
-        startMinutes,
-        durationMinutes: 15, // Default 15 minutes on mobile
-        title: 'New Event',
-        color: getRandomColor()
-      };
+      const rect = container.getBoundingClientRect();
+      const totalMinutes = getDayTotalMinutes(dragDayIndex);
       
-      setEvents(prev => [...prev, newEvent]);
-      setFocusedEventId(newEvent.id);
-      toast.success('Event created! Use handles to resize.');
+      // Calculate start and end minutes
+      const startY = Math.min(dragStartY, dragCurrentY);
+      const endY = Math.max(dragStartY, dragCurrentY);
+      const startMinutes = Math.max(0, pixelsToMinutes(startY, rect.height, totalMinutes));
+      const endMinutes = Math.min(totalMinutes, pixelsToMinutes(endY, rect.height, totalMinutes));
+      const durationMinutes = Math.max(MIN_DURATION, endMinutes - startMinutes);
       
-      // Hide tooltip after event is created, with delay so user can read it
-      tooltipHideTimerRef.current = setTimeout(() => {
-        setShowHoldTooltip(false);
-      }, 1000);
-    }, 500); // 500ms hold to create
-  }, [weekData, focusedEventId, checkEventOverlap]);
-
-  const handleTouchEnd = useCallback(() => {
-    if (touchTimerRef.current) {
-      clearTimeout(touchTimerRef.current);
-      touchTimerRef.current = null;
+      // Check for overlap
+      if (checkEventOverlap(dragDayIndex, startMinutes, durationMinutes)) {
+        toast.error('Cannot create overlapping events');
+        setIsDraggingNew(false);
+        setDragDayIndex(null);
+        return;
+      }
+      
+      // Get the day and calculate actual date/time
+      const day = weekData[dragDayIndex];
+      const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
+      const baseHour = parseTimeToHours(timeSlotStart);
+      
+      // Calculate start date/time
+      const eventDate = new Date(day.date);
+      const totalStartMinutes = (baseHour * 60) + startMinutes;
+      const hours = Math.floor(totalStartMinutes / 60);
+      const minutes = totalStartMinutes % 60;
+      eventDate.setHours(hours, minutes, 0, 0);
+      
+      // Calculate end date/time
+      const endDate = new Date(eventDate);
+      endDate.setMinutes(endDate.getMinutes() + durationMinutes);
+      
+      // Validate: Check if in the past
+      const validation = validateEventTime(eventDate, endDate);
+      if (!validation.isValid) {
+        toast.error(validation.error || 'Invalid event time');
+        setIsDraggingNew(false);
+        setDragDayIndex(null);
+        return;
+      }
+      
+      // Generate event name
+      const eventName = generateEventName(eventDate);
+      
+      // Open creation dialog with pre-filled data
+      eventActions.openCreateForm({
+        summary: eventName,
+        start: eventDate,
+        end: endDate,
+        conferenceData: true, // Auto-enable Google Meet
+      });
+      
+      // Reset drag state
+      setIsDraggingNew(false);
+      setDragDayIndex(null);
+      return;
     }
-    // Hide tooltip after a delay so user has time to read it
-    tooltipHideTimerRef.current = setTimeout(() => {
-      setShowHoldTooltip(false);
-    }, 1000);
+    
+    // Handle rescheduling or resizing existing event
+    if (draggingEventId && originalEventData && dragType) {
+      const event = events.find(ev => ev.id === draggingEventId);
+      if (!event) {
+        setDraggingEventId(null);
+        setDragType(null);
+        setOriginalEventData(null);
+        return;
+      }
+      
+      // Check for overlap at new position/size
+      if (checkEventOverlap(originalEventData.dayIndex, previewStartMinutes, previewDurationMinutes, draggingEventId)) {
+        const action = dragType === 'move' ? 'reschedule' : 'resize';
+        toast.error(`Cannot ${action}: would overlap with another event`);
+        setDraggingEventId(null);
+        setDragType(null);
+        setOriginalEventData(null);
+        return;
+      }
+      
+      // Calculate new start and end times
+      const day = weekData[originalEventData.dayIndex];
+      const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
+      const baseHour = parseTimeToHours(timeSlotStart);
+      
+      const eventDate = new Date(day.date);
+      const totalStartMinutes = (baseHour * 60) + previewStartMinutes;
+      const hours = Math.floor(totalStartMinutes / 60);
+      const minutes = totalStartMinutes % 60;
+      eventDate.setHours(hours, minutes, 0, 0);
+      
+      const endDate = new Date(eventDate);
+      endDate.setMinutes(endDate.getMinutes() + previewDurationMinutes);
+      
+      // Validate: Check if new time is in the past
+      const validation = validateEventTime(eventDate, endDate);
+      if (!validation.isValid) {
+        const action = dragType === 'move' ? 'reschedule' : 'resize';
+        toast.error(validation.error || `Cannot ${action} to past time`);
+        setDraggingEventId(null);
+        setDragType(null);
+        setOriginalEventData(null);
+        return;
+      }
+      
+      // Extract the actual Google Calendar event ID
+      const calendarEventId = event.id.replace('calendar-', '');
+      
+      // Find the original Google Calendar event to get all details
+      const googleEvent = googleEvents.find((ge) => ge.id === calendarEventId);
+      if (!googleEvent) {
+        toast.error('Event not found');
+        setDraggingEventId(null);
+        setOriginalEventData(null);
+        return;
+      }
+      
+      const startDateTime = googleEvent.start?.dateTime || googleEvent.start?.date;
+      const endDateTime = googleEvent.end?.dateTime || googleEvent.end?.date;
+      
+      if (!startDateTime || !endDateTime) {
+        toast.error('Invalid event date/time');
+        setDraggingEventId(null);
+        setDragType(null);
+        setOriginalEventData(null);
+        return;
+      }
+      
+      // Open edit form with updated times
+      eventActions.openEditForm(calendarEventId, {
+        summary: googleEvent.summary || event.title,
+        description: googleEvent.description,
+        start: eventDate, // NEW start time
+        end: endDate, // NEW end time
+        location: googleEvent.location,
+        attendees: googleEvent.attendees?.map((a) => ({
+          email: a.email,
+          displayName: a.displayName,
+        })),
+        conferenceData: !!googleEvent.hangoutLink,
+      });
+      
+      // Reset drag state
+      setDraggingEventId(null);
+      setDragType(null);
+      setOriginalEventData(null);
+      setFocusedEventId(null);
+    }
+  }, [isDraggingNew, draggingEventId, dragType, dragDayIndex, dragStartY, dragCurrentY, originalEventData, previewStartMinutes, previewDurationMinutes, weekData, events, googleEvents, eventActions, checkEventOverlap]);
+
+  // Handle event click - focus event (show toolbar)
+  const handleEventClick = useCallback((e: React.MouseEvent, eventId: string) => {
+    e.stopPropagation();
+    setFocusedEventId(eventId);
   }, []);
 
-  // Event drag handlers
-  const handleEventMouseDown = useCallback((e: React.MouseEvent, eventId: string, type: 'move' | 'resize-top' | 'resize-bottom') => {
+  // Handle event drag start - reschedule event (move entire event)
+  const handleEventDragStart = useCallback((e: React.MouseEvent, eventId: string, type: 'move' | 'resize-top' | 'resize-bottom') => {
     e.stopPropagation();
-    const event = events.find(ev => ev.id === eventId);
-    if (!event) return;
     
-    setDragEventId(eventId);
+    const event = events.find(ev => ev.id === eventId);
+    if (!event || !event.isFromCalendar) return;
+    
+    // Check if event is in the past
+    const day = weekData[event.dayIndex];
+    const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
+    const baseHour = parseTimeToHours(timeSlotStart);
+    
+    const eventDate = new Date(day.date);
+    const totalMinutes = (baseHour * 60) + event.startMinutes;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    eventDate.setHours(hours, minutes, 0, 0);
+    
+    const endDate = new Date(eventDate);
+    endDate.setMinutes(endDate.getMinutes() + event.durationMinutes);
+    
+    if (isPastEvent(endDate)) {
+      toast.error('Cannot reschedule past events');
+      return;
+    }
+    
+    // Start dragging
+    setDraggingEventId(eventId);
     setDragType(type);
+    setOriginalEventData({
+      dayIndex: event.dayIndex,
+      startMinutes: event.startMinutes,
+      durationMinutes: event.durationMinutes,
+    });
+    setPreviewStartMinutes(event.startMinutes);
+    setPreviewDurationMinutes(event.durationMinutes);
     setDragStartY(e.clientY);
-    setDragStartMinutes(event.startMinutes);
-    setDragStartDuration(event.durationMinutes);
-    setFocusedEventId(eventId);
-  }, [events]);
+    
+    // Calculate offset from top of event (for move type)
+    if (type === 'move') {
+      const container = dayRefs.current[event.dayIndex];
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const totalMinutes = getDayTotalMinutes(event.dayIndex);
+        const eventTop = minutesToPixels(event.startMinutes, rect.height, totalMinutes);
+        const clickY = e.clientY - rect.top;
+        setDragOffsetY(clickY - eventTop);
+      }
+    }
+  }, [events, weekData]);
 
-  // Touch handlers for event resizing on mobile
-  const handleEventTouchStart = useCallback((e: React.TouchEvent, eventId: string, type: 'move' | 'resize-top' | 'resize-bottom') => {
-    e.stopPropagation();
-    const event = events.find(ev => ev.id === eventId);
-    if (!event) return;
+  const handleDeleteEvent = useCallback(() => {
+    if (!focusedEventId) return;
+    
+    const event = events.find(ev => ev.id === focusedEventId);
+    if (!event || !event.isFromCalendar) return;
+    
+    // Extract the actual Google Calendar event ID (remove "calendar-" prefix)
+    const calendarEventId = event.id.replace('calendar-', '');
+    
+    setShowDeleteDialog(true);
+  }, [focusedEventId, events]);
+
+  const confirmDeleteEvent = useCallback(() => {
+    if (!focusedEventId) return;
+    
+    const event = events.find(ev => ev.id === focusedEventId);
+    if (!event || !event.isFromCalendar) return;
+    
+    // Extract the actual Google Calendar event ID
+    const calendarEventId = event.id.replace('calendar-', '');
+    
+    eventActions.handleDeleteEvent(calendarEventId, event.title);
+    setFocusedEventId(null);
+    setShowDeleteDialog(false);
+  }, [focusedEventId, events, eventActions]);
+
+  /**
+   * Handle editing a calendar event
+   */
+  const handleEditEvent = useCallback(() => {
+    if (!focusedEventId) return;
+    
+    const event = events.find(ev => ev.id === focusedEventId);
+    if (!event || !event.isFromCalendar) return;
+    
+    // Check if event is in the past
+    const day = weekData[event.dayIndex];
+    const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
+    const baseHour = parseTimeToHours(timeSlotStart);
+    
+    const eventDate = new Date(day.date);
+    const totalMinutes = (baseHour * 60) + event.startMinutes;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    eventDate.setHours(hours, minutes, 0, 0);
+    
+    const endDate = new Date(eventDate);
+    endDate.setMinutes(endDate.getMinutes() + event.durationMinutes);
+    
+    if (isPastEvent(endDate)) {
+      toast.error('Cannot edit past events');
+      return;
+    }
+    
+    // Extract the actual Google Calendar event ID
+    const calendarEventId = event.id.replace('calendar-', '');
+    
+    // Find the original Google Calendar event to get all details
+    const googleEvent = googleEvents.find((ge) => ge.id === calendarEventId);
+    if (!googleEvent) {
+      toast.error('Event not found');
+      return;
+    }
+    
+    // Open edit form with event data
+    const startDateTime = googleEvent.start?.dateTime || googleEvent.start?.date;
+    const endDateTime = googleEvent.end?.dateTime || googleEvent.end?.date;
+    
+    if (!startDateTime || !endDateTime) {
+      toast.error('Invalid event date/time');
+      return;
+    }
+    
+    eventActions.openEditForm(calendarEventId, {
+      summary: googleEvent.summary || event.title,
+      description: googleEvent.description,
+      start: new Date(startDateTime),
+      end: new Date(endDateTime),
+      location: googleEvent.location,
+      attendees: googleEvent.attendees?.map((a) => ({
+        email: a.email,
+        displayName: a.displayName,
+      })),
+      conferenceData: !!googleEvent.hangoutLink,
+    });
+    
+    setFocusedEventId(null);
+  }, [focusedEventId, events, weekData, googleEvents, eventActions]);
+
+  // ========== TOUCH EVENT HANDLERS FOR MOBILE ==========
+  
+  // Handle touch start for long press to create event
+  const handleTouchStart = useCallback((e: React.TouchEvent, dayIndex: number) => {
+    if (!isMobile || !weekData[dayIndex].available) return;
     
     const touch = e.touches[0];
-    setDragEventId(eventId);
-    setDragType(type);
-    setDragStartY(touch.clientY);
-    setDragStartMinutes(event.startMinutes);
-    setDragStartDuration(event.durationMinutes);
-    setFocusedEventId(eventId);
-  }, [events]);
-
-  const handleTouchMove = useCallback((e: TouchEvent) => {
-    if (!dragEventId) return;
-    
-    // Prevent scrolling during drag
-    e.preventDefault();
-    
-    const touch = e.touches[0];
-    
-    const dayIndex = events.find(ev => ev.id === dragEventId)?.dayIndex;
-    if (dayIndex === null || dayIndex === undefined) return;
-    
     const container = dayRefs.current[dayIndex];
     if (!container) return;
     
     const rect = container.getBoundingClientRect();
+    const y = touch.clientY - rect.top;
     const totalMinutes = getDayTotalMinutes(dayIndex);
+    const startMinutes = Math.max(0, pixelsToMinutes(y, rect.height, totalMinutes));
     
-    if (dragType === 'resize-bottom') {
-      const deltaY = touch.clientY - dragStartY;
-      const deltaMinutes = pixelsToMinutes(deltaY, rect.height, totalMinutes);
-      let newDuration = Math.max(MIN_DURATION, dragStartDuration + deltaMinutes);
-      newDuration = Math.min(newDuration, MAX_DURATION);
-      
-      const event = events.find(ev => ev.id === dragEventId);
-      if (event) {
-        const maxDuration = totalMinutes - event.startMinutes;
-        newDuration = Math.min(newDuration, maxDuration);
-        
-        // Check for overlap with other events
-        if (!checkEventOverlap(dayIndex, event.startMinutes, newDuration, dragEventId)) {
-          setEvents(prev => prev.map(ev => 
-            ev.id === dragEventId ? { ...ev, durationMinutes: newDuration } : ev
-          ));
-        }
-      }
-    } else if (dragType === 'resize-top') {
-      const deltaY = touch.clientY - dragStartY;
-      const deltaMinutes = pixelsToMinutes(deltaY, rect.height, totalMinutes);
-      const event = events.find(ev => ev.id === dragEventId);
-      
-      if (event) {
-        let newStartMinutes = dragStartMinutes + deltaMinutes;
-        let newDuration = dragStartDuration - deltaMinutes;
-        
-        newStartMinutes = Math.max(0, newStartMinutes);
-        newDuration = Math.max(MIN_DURATION, newDuration);
-        newDuration = Math.min(newDuration, MAX_DURATION);
-        
-        const maxEnd = totalMinutes;
-        if (newStartMinutes + newDuration > maxEnd) {
-          newStartMinutes = maxEnd - newDuration;
-        }
-        
-        // Check for overlap with other events
-        if (!checkEventOverlap(dayIndex, newStartMinutes, newDuration, dragEventId)) {
-          setEvents(prev => prev.map(ev => 
-            ev.id === dragEventId ? 
-              { ...ev, startMinutes: newStartMinutes, durationMinutes: newDuration } : ev
-          ));
-        }
-      }
-    } else if (dragType === 'move') {
-      const deltaY = touch.clientY - dragStartY;
-      const deltaMinutes = pixelsToMinutes(deltaY, rect.height, totalMinutes);
-      const event = events.find(ev => ev.id === dragEventId);
-      
-      if (event) {
-        let newStartMinutes = dragStartMinutes + deltaMinutes;
-        newStartMinutes = Math.max(0, newStartMinutes);
-        newStartMinutes = Math.min(newStartMinutes, totalMinutes - event.durationMinutes);
-        
-        // Check for overlap with other events
-        if (!checkEventOverlap(dayIndex, newStartMinutes, event.durationMinutes, dragEventId)) {
-          setEvents(prev => prev.map(ev => 
-            ev.id === dragEventId ? { ...ev, startMinutes: newStartMinutes } : ev
-          ));
-        }
-      }
-    }
-  }, [dragEventId, dragType, dragStartY, dragStartMinutes, dragStartDuration, events, weekData, checkEventOverlap]);
-
-  const handleTouchEndResize = useCallback(() => {
-    setDragEventId(null);
-    setDragType(null);
-  }, []);
-
-  const handleDeleteEvent = useCallback(() => {
-    setShowDeleteDialog(true);
-  }, []);
-
-  const confirmDeleteEvent = useCallback(() => {
-    if (focusedEventId) {
-      setEvents(prev => prev.filter(ev => ev.id !== focusedEventId));
-      setFocusedEventId(null);
-      setShowDeleteDialog(false);
-      toast.success('Event deleted');
-    }
-  }, [focusedEventId]);
-
-  const handleExpandEvent = useCallback(() => {
-    if (focusedEventId && onExpandEvent) {
-      const event = events.find(ev => ev.id === focusedEventId);
-      if (event) {
-        const day = weekData[event.dayIndex];
+    // Check if touching existing event
+    const dayEvents = events.filter(ev => ev.dayIndex === dayIndex);
+    const touchedEvent = dayEvents.find(event => {
+      const eventTop = minutesToPixels(event.startMinutes, rect.height, totalMinutes);
+      const eventBottom = eventTop + minutesToPixels(event.durationMinutes, rect.height, totalMinutes);
+      return y >= eventTop && y <= eventBottom;
+    });
+    
+    // Store touch start position
+    setTouchStartPos({ x: touch.clientX, y: touch.clientY });
+    
+    if (!touchedEvent) {
+      // Start long press timer for creating new event
+      const timer = setTimeout(() => {
+        // Create 15-minute event
+        const day = weekData[dayIndex];
         const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
-        onExpandEvent(event, day.date, timeSlotStart);
+        const baseHour = parseTimeToHours(timeSlotStart);
+        
+        const eventDate = new Date(day.date);
+        const totalStartMinutes = (baseHour * 60) + startMinutes;
+        const hours = Math.floor(totalStartMinutes / 60);
+        const minutes = totalStartMinutes % 60;
+        eventDate.setHours(hours, minutes, 0, 0);
+        
+        const endDate = new Date(eventDate);
+        endDate.setMinutes(endDate.getMinutes() + 15); // 15 minutes
+        
+        // Validate time
+        const validation = validateEventTime(eventDate, endDate);
+        if (!validation.isValid) {
+          toast.error(validation.error || 'Invalid event time');
+          return;
+        }
+        
+        // Check for overlap
+        if (checkEventOverlap(dayIndex, startMinutes, 15)) {
+          toast.error('Cannot create overlapping events');
+          return;
+        }
+        
+        // Haptic feedback if available
+        if (navigator.vibrate) {
+          navigator.vibrate(50);
+        }
+        
+        const eventName = generateEventName(eventDate);
+        eventActions.openCreateForm({
+          summary: eventName,
+          start: eventDate,
+          end: endDate,
+          conferenceData: true,
+        });
+        
+        setLongPressTimer(null);
+      }, LONG_PRESS_DURATION);
+      
+      setLongPressTimer(timer);
+    }
+  }, [isMobile, weekData, events, eventActions, checkEventOverlap]);
+
+  // Handle touch move
+  const handleTouchMove = useCallback((e: React.TouchEvent, dayIndex: number) => {
+    if (!isMobile) return;
+    
+    const touch = e.touches[0];
+    if (!touch) return;
+    
+    // Cancel long press if user moves finger too much
+    if (longPressTimer && touchStartPos) {
+      const deltaX = Math.abs(touch.clientX - touchStartPos.x);
+      const deltaY = Math.abs(touch.clientY - touchStartPos.y);
+      
+      if (deltaX > 10 || deltaY > 10) {
+        clearTimeout(longPressTimer);
+        setLongPressTimer(null);
       }
     }
-  }, [focusedEventId, events, weekData, onExpandEvent]);
+    
+    // Handle dragging existing event
+    if (isTouchDragging && draggingEventId && originalEventData) {
+      // Note: preventDefault is handled by native event listener with passive: false
+      
+      const container = dayRefs.current[originalEventData.dayIndex];
+      if (!container) return;
+      
+      const rect = container.getBoundingClientRect();
+      const totalMinutes = getDayTotalMinutes(originalEventData.dayIndex);
+      
+      const deltaY = touch.clientY - dragStartY;
+      const deltaMinutes = pixelsToMinutes(deltaY, rect.height, totalMinutes);
+      
+      // Use requestAnimationFrame for smoother updates
+      requestAnimationFrame(() => {
+        if (dragType === 'move') {
+          let newStartMinutes = originalEventData.startMinutes + deltaMinutes;
+          newStartMinutes = Math.max(0, newStartMinutes);
+          newStartMinutes = Math.min(newStartMinutes, totalMinutes - originalEventData.durationMinutes);
+          
+          setPreviewStartMinutes(newStartMinutes);
+          setPreviewDurationMinutes(originalEventData.durationMinutes);
+        } else if (dragType === 'resize-top') {
+          let newStartMinutes = originalEventData.startMinutes + deltaMinutes;
+          let newDuration = originalEventData.durationMinutes - deltaMinutes;
+          
+          newStartMinutes = Math.max(0, newStartMinutes);
+          newDuration = Math.max(MIN_DURATION, newDuration);
+          
+          const originalEndMinutes = originalEventData.startMinutes + originalEventData.durationMinutes;
+          if (newStartMinutes + newDuration > originalEndMinutes) {
+            newStartMinutes = originalEndMinutes - newDuration;
+          }
+          
+          setPreviewStartMinutes(newStartMinutes);
+          setPreviewDurationMinutes(newDuration);
+        } else if (dragType === 'resize-bottom') {
+          let newDuration = originalEventData.durationMinutes + deltaMinutes;
+          newDuration = Math.max(MIN_DURATION, newDuration);
+          
+          const maxDuration = totalMinutes - originalEventData.startMinutes;
+          newDuration = Math.min(newDuration, maxDuration);
+          
+          setPreviewStartMinutes(originalEventData.startMinutes);
+          setPreviewDurationMinutes(newDuration);
+        }
+      });
+    }
+  }, [isMobile, longPressTimer, touchStartPos, isTouchDragging, draggingEventId, originalEventData, dragType, dragStartY]);
 
-  // Add/remove event listeners
+  // Handle touch end
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!isMobile) return;
+    
+    // Clear long press timer
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      setLongPressTimer(null);
+    }
+    
+    setTouchStartPos(null);
+    
+    // Handle end of drag
+    if (isTouchDragging && draggingEventId && originalEventData) {
+      const event = events.find(ev => ev.id === draggingEventId);
+      if (!event) {
+        setIsTouchDragging(false);
+        setDraggingEventId(null);
+        setDragType(null);
+        setOriginalEventData(null);
+        return;
+      }
+      
+      // Check for overlap
+      if (checkEventOverlap(originalEventData.dayIndex, previewStartMinutes, previewDurationMinutes, draggingEventId)) {
+        const action = dragType === 'move' ? 'reschedule' : 'resize';
+        toast.error(`Cannot ${action}: would overlap with another event`);
+        setIsTouchDragging(false);
+        setDraggingEventId(null);
+        setDragType(null);
+        setOriginalEventData(null);
+        return;
+      }
+      
+      // Calculate new times and open edit form
+      const day = weekData[originalEventData.dayIndex];
+      const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
+      const baseHour = parseTimeToHours(timeSlotStart);
+      
+      const eventDate = new Date(day.date);
+      const totalStartMinutes = (baseHour * 60) + previewStartMinutes;
+      const hours = Math.floor(totalStartMinutes / 60);
+      const minutes = totalStartMinutes % 60;
+      eventDate.setHours(hours, minutes, 0, 0);
+      
+      const endDate = new Date(eventDate);
+      endDate.setMinutes(endDate.getMinutes() + previewDurationMinutes);
+      
+      const validation = validateEventTime(eventDate, endDate);
+      if (!validation.isValid) {
+        toast.error(validation.error || 'Invalid event time');
+        setIsTouchDragging(false);
+        setDraggingEventId(null);
+        setDragType(null);
+        setOriginalEventData(null);
+        return;
+      }
+      
+      const calendarEventId = event.id.replace('calendar-', '');
+      const googleEvent = googleEvents.find((ge) => ge.id === calendarEventId);
+      
+      if (googleEvent) {
+        eventActions.openEditForm(calendarEventId, {
+          summary: googleEvent.summary || event.title,
+          description: googleEvent.description,
+          start: eventDate,
+          end: endDate,
+          location: googleEvent.location,
+          attendees: googleEvent.attendees?.map((a) => ({
+            email: a.email,
+            displayName: a.displayName,
+          })),
+          conferenceData: !!googleEvent.hangoutLink,
+        });
+      }
+      
+      setIsTouchDragging(false);
+      setDraggingEventId(null);
+      setDragType(null);
+      setOriginalEventData(null);
+      setFocusedEventId(null);
+    }
+  }, [isMobile, longPressTimer, isTouchDragging, draggingEventId, originalEventData, dragType, previewStartMinutes, previewDurationMinutes, events, weekData, googleEvents, eventActions, checkEventOverlap]);
+
+  // Handle touch start on event (for dragging)
+  const handleEventTouchStart = useCallback((e: React.TouchEvent, eventId: string, type: 'move' | 'resize-top' | 'resize-bottom') => {
+    if (!isMobile) return;
+    
+    e.stopPropagation();
+    
+    const event = events.find(ev => ev.id === eventId);
+    if (!event || !event.isFromCalendar) return;
+    
+    // Check if event is in the past
+    const day = weekData[event.dayIndex];
+    const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
+    const baseHour = parseTimeToHours(timeSlotStart);
+    
+    const eventDate = new Date(day.date);
+    const totalMinutes = (baseHour * 60) + event.startMinutes;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    eventDate.setHours(hours, minutes, 0, 0);
+    
+    const endDate = new Date(eventDate);
+    endDate.setMinutes(endDate.getMinutes() + event.durationMinutes);
+    
+    if (isPastEvent(endDate)) {
+      toast.error('Cannot reschedule past events');
+      return;
+    }
+    
+    const touch = e.touches[0];
+    
+    setIsTouchDragging(true);
+    setDraggingEventId(eventId);
+    setDragType(type);
+    setOriginalEventData({
+      dayIndex: event.dayIndex,
+      startMinutes: event.startMinutes,
+      durationMinutes: event.durationMinutes,
+    });
+    setPreviewStartMinutes(event.startMinutes);
+    setPreviewDurationMinutes(event.durationMinutes);
+    setDragStartY(touch.clientY);
+    
+    // Haptic feedback
+    if (navigator.vibrate) {
+      navigator.vibrate(30);
+    }
+  }, [isMobile, events, weekData]);
+
+  // Add/remove event listeners for drag (mouse and touch)
   useEffect(() => {
-    if (pendingEventData || isCreating || dragEventId) {
+    if (isDraggingNew || draggingEventId || isTouchDragging) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
-      window.addEventListener('touchmove', handleTouchMove, { passive: false });
-      window.addEventListener('touchend', handleTouchEndResize);
       
       return () => {
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mouseup', handleMouseUp);
-        window.removeEventListener('touchmove', handleTouchMove);
-        window.removeEventListener('touchend', handleTouchEndResize);
       };
     }
-  }, [pendingEventData, isCreating, dragEventId, handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEndResize]);
+  }, [isDraggingNew, draggingEventId, isTouchDragging, handleMouseMove, handleMouseUp]);
 
-  // Cleanup timers on unmount
+  // Add touch event listeners to day containers with passive: false
   useEffect(() => {
-    return () => {
-      if (touchTimerRef.current) {
-        clearTimeout(touchTimerRef.current);
-      }
-      if (tooltipHideTimerRef.current) {
-        clearTimeout(tooltipHideTimerRef.current);
+    if (!isMobile) return;
+
+    const containers = dayRefs.current.filter(Boolean);
+    
+    const handleTouchMoveNative = (e: TouchEvent) => {
+      if (isTouchDragging || longPressTimer) {
+        e.preventDefault(); // This works because passive: false
       }
     };
-  }, []);
+
+    containers.forEach(container => {
+      if (container) {
+        container.addEventListener('touchmove', handleTouchMoveNative, { passive: false });
+      }
+    });
+
+    return () => {
+      containers.forEach(container => {
+        if (container) {
+          container.removeEventListener('touchmove', handleTouchMoveNative);
+        }
+      });
+    };
+  }, [isMobile, isTouchDragging, longPressTimer]);
 
   return (
     <motion.div
@@ -743,16 +1180,32 @@ export function AvailabilityPage({
                 </div>
               </div>
               
-              {/* Right: Share button */}
-              <Button
-                onClick={() => copyToClipboard(window.location.href)}
-                variant="outline"
-                size={isMobile ? "sm" : "sm"}
-                className="bg-[#e8e4d9]/60 hover:bg-[#8b8475] text-[#8b8475] hover:text-[#f5f3ef] border-[#d4cfbe]/40 flex-shrink-0"
-              >
-                <Share2 className={`${isMobile ? 'h-4 w-4' : 'h-4 w-4 mr-2'}`} />
-                {!isMobile && 'Share'}
-              </Button>
+              {/* Right: Refresh and Share buttons */}
+              <div className="flex gap-2 flex-shrink-0">
+                <Button
+                  onClick={() => {
+                    refetchEvents();
+                    toast.success('Refreshing calendar...');
+                  }}
+                  variant="outline"
+                  size={isMobile ? "sm" : "sm"}
+                  disabled={isRefetching}
+                  className="bg-[#e8e4d9]/60 hover:bg-[#8b8475] text-[#8b8475] hover:text-[#f5f3ef] border-[#d4cfbe]/40"
+                  title="Refresh calendar events"
+                >
+                  <RefreshCw className={`${isMobile ? 'h-4 w-4' : 'h-4 w-4 mr-2'} ${isRefetching ? 'animate-spin' : ''}`} />
+                  {!isMobile && 'Refresh'}
+                </Button>
+                <Button
+                  onClick={() => copyToClipboard(window.location.href)}
+                  variant="outline"
+                  size={isMobile ? "sm" : "sm"}
+                  className="bg-[#e8e4d9]/60 hover:bg-[#8b8475] text-[#8b8475] hover:text-[#f5f3ef] border-[#d4cfbe]/40"
+                >
+                  <Share2 className={`${isMobile ? 'h-4 w-4' : 'h-4 w-4 mr-2'}`} />
+                  {!isMobile && 'Share'}
+                </Button>
+              </div>
             </div>
           </motion.div>
           
@@ -798,7 +1251,31 @@ export function AvailabilityPage({
                 const height = day.available ? getProportionalHeight(day.timeSlots[0], maxHeight) : maxHeight;
                 const isLastDay = i === weekData.length - 1;
                 const totalMinutes = getDayTotalMinutes(i);
-                const dayEvents = events.filter(ev => ev.dayIndex === i);
+                
+                // Get events for this day, including preview event if dragging
+                let dayEvents = events.filter(ev => ev.dayIndex === i);
+                
+                // Add preview event if user is dragging to create new event on this day
+                if (isDraggingNew && dragDayIndex === i) {
+                  const startY = Math.min(dragStartY, dragCurrentY);
+                  const endY = Math.max(dragStartY, dragCurrentY);
+                  const startMinutes = Math.max(0, pixelsToMinutes(startY, height, totalMinutes));
+                  const endMinutes = Math.min(totalMinutes, pixelsToMinutes(endY, height, totalMinutes));
+                  const durationMinutes = Math.max(MIN_DURATION, endMinutes - startMinutes);
+                  
+                  // Create a temporary preview event that will render with the same code
+                  const previewEvent: AvailabilityEvent = {
+                    id: 'preview-new-event',
+                    dayIndex: i,
+                    startMinutes,
+                    durationMinutes,
+                    title: 'New Event',
+                    color: '#3b82f6',
+                    isFromCalendar: false,
+                  };
+                  
+                  dayEvents = [...dayEvents, previewEvent];
+                }
                 
                 return (
                   <motion.div
@@ -815,12 +1292,16 @@ export function AvailabilityPage({
                       <div 
                         ref={el => dayRefs.current[i] = el}
                         className="w-full bg-green-500/70 relative cursor-crosshair select-none"
-                        style={{ height: `${height}px` }}
+                        style={{ 
+                          height: `${height}px`,
+                          touchAction: isMobile && (isTouchDragging || focusedEventId) ? 'none' : 'auto'
+                        }}
                         onMouseDown={(e) => !isMobile && handleMouseDown(e, i)}
                         onMouseMove={(e) => !isMobile && handleCalendarMouseMove(e, i)}
                         onMouseLeave={handleCalendarMouseLeave}
                         onTouchStart={(e) => isMobile && handleTouchStart(e, i)}
-                        onTouchEnd={handleTouchEnd}
+                        onTouchMove={(e) => isMobile && handleTouchMove(e, i)}
+                        onTouchEnd={(e) => isMobile && handleTouchEnd(e)}
                         onClick={(e) => {
                           // If clicking on calendar background (not an event), unfocus
                           if (focusedEventId && e.target === e.currentTarget) {
@@ -828,8 +1309,10 @@ export function AvailabilityPage({
                           }
                         }}
                       >
+
+
                         {/* Hover Time Indicator */}
-                        {hoveredDayIndex === i && !isCreating && !dragEventId && (
+                        {hoveredDayIndex === i && !isDraggingNew && !draggingEventId && (
                           <div
                             className="absolute left-0 right-0 pointer-events-none z-30"
                             style={{
@@ -854,12 +1337,19 @@ export function AvailabilityPage({
                           </div>
                         )}
 
-                        {/* Events */}
+                        {/* Events (includes preview event when dragging) */}
                         <AnimatePresence>
                           {dayEvents.map(event => {
-                            const top = minutesToPixels(event.startMinutes, height, totalMinutes);
-                            const eventHeight = minutesToPixels(event.durationMinutes, height, totalMinutes);
                             const isFocused = focusedEventId === event.id;
+                            const isBeingDragged = draggingEventId === event.id;
+                            const isPreview = event.id === 'preview-new-event';
+                            
+                            // Use preview position/size if this event is being dragged, otherwise use actual position
+                            const displayStartMinutes = isBeingDragged ? previewStartMinutes : event.startMinutes;
+                            const displayDurationMinutes = isBeingDragged ? previewDurationMinutes : event.durationMinutes;
+                            
+                            const top = minutesToPixels(displayStartMinutes, height, totalMinutes);
+                            const eventHeight = minutesToPixels(displayDurationMinutes, height, totalMinutes);
                             
                             return (
                               <motion.div
@@ -867,72 +1357,148 @@ export function AvailabilityPage({
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.9 }}
-                                className="absolute left-1 right-1 rounded-md shadow-lg cursor-move"
+                                className={`absolute left-1 right-1 rounded-md shadow-lg ${
+                                  isPreview ? 'pointer-events-none' : (isFocused && !isBeingDragged ? 'cursor-move' : 'cursor-pointer')
+                                }`}
                                 style={{
                                   top: `${top}px`,
                                   height: `${eventHeight}px`,
                                   backgroundColor: event.color,
                                   border: isFocused ? '2px solid white' : 'none',
-                                  zIndex: isFocused ? 10 : 1,
-                                  touchAction: 'none' // Prevent default touch behaviors like scrolling
+                                  zIndex: isFocused ? 10 : (isPreview ? 10 : 1),
+                                  opacity: 1, // Keep full opacity even when dragging
+                                  transition: isBeingDragged || isPreview ? 'none' : 'all 0.2s ease',
                                 }}
-                                onMouseDown={(e) => !isMobile && handleEventMouseDown(e, event.id, 'move')}
+                                onClick={(e) => {
+                                  if (!isBeingDragged && !isPreview) {
+                                    handleEventClick(e, event.id);
+                                  }
+                                }}
+                                onMouseDown={(e) => {
+                                  if (isFocused && !isBeingDragged && !isPreview) {
+                                    handleEventDragStart(e, event.id, 'move');
+                                  }
+                                }}
                                 onTouchStart={(e) => {
-                                  if (isMobile) {
-                                    e.preventDefault(); // Prevent scrolling immediately
+                                  if (isMobile && isFocused && !isBeingDragged && !isPreview) {
                                     handleEventTouchStart(e, event.id, 'move');
                                   }
                                 }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setFocusedEventId(event.id);
-                                }}
                               >
-                                {/* Event content */}
-                                <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-2 pointer-events-none gap-0.5">
-                                  <div className="truncate max-w-full text-sm">{event.title}</div>
-                                  <div className="text-xs opacity-90">
-                                    {event.durationMinutes}m
+                                {/* Event content - Title and duration */}
+                                <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-2 pointer-events-none">
+                                  <div className="truncate max-w-full text-sm font-medium">{event.title}</div>
+                                  <div className="text-xs mt-1 opacity-90">
+                                    {Math.round(displayDurationMinutes)} min
                                   </div>
                                 </div>
 
+                                {/* Start time label - appears above event when focused (stays during drag) */}
+                                <AnimatePresence>
+                                  {(isFocused || isPreview) && (
+                                    <motion.div
+                                      initial={{ opacity: 0, y: 5 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      exit={{ opacity: 0, y: 5 }}
+                                      className="absolute -top-9 left-1/2 -translate-x-1/2 bg-white text-[#8b8475] text-base font-medium px-2 py-1 rounded shadow-md whitespace-nowrap z-30 pointer-events-none"
+                                    >
+                                      {(() => {
+                                        const day = weekData[event.dayIndex];
+                                        const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
+                                        const baseHour = parseTimeToHours(timeSlotStart);
+                                        // Use preview times if dragging, otherwise use actual event times
+                                        const displayStartMinutes = isBeingDragged && draggingEventId === event.id ? previewStartMinutes : event.startMinutes;
+                                        const totalStartMinutes = (baseHour * 60) + displayStartMinutes;
+                                        const hours = Math.floor(totalStartMinutes / 60);
+                                        const mins = totalStartMinutes % 60;
+                                        const period = hours >= 12 ? 'PM' : 'AM';
+                                        const displayHours = hours > 12 ? hours - 12 : hours === 0 ? 12 : hours;
+                                        return `${displayHours}:${mins.toString().padStart(2, '0')} ${period}`;
+                                      })()}
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+
+                                {/* End time label - appears below event when focused (stays during drag) */}
+                                <AnimatePresence>
+                                  {(isFocused || isPreview) && (
+                                    <motion.div
+                                      initial={{ opacity: 0, y: -5 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      exit={{ opacity: 0, y: -5 }}
+                                      className="absolute -bottom-9 left-1/2 -translate-x-1/2 bg-white text-[#8b8475] text-base font-medium px-2 py-1 rounded shadow-md whitespace-nowrap z-30 pointer-events-none"
+                                    >
+                                      {(() => {
+                                        const day = weekData[event.dayIndex];
+                                        const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
+                                        const baseHour = parseTimeToHours(timeSlotStart);
+                                        // Use preview times if dragging, otherwise use actual event times
+                                        const displayStartMinutes = isBeingDragged && draggingEventId === event.id ? previewStartMinutes : event.startMinutes;
+                                        const displayDurationMinutes = isBeingDragged && draggingEventId === event.id ? previewDurationMinutes : event.durationMinutes;
+                                        const totalEndMinutes = (baseHour * 60) + displayStartMinutes + displayDurationMinutes;
+                                        const hours = Math.floor(totalEndMinutes / 60);
+                                        const mins = totalEndMinutes % 60;
+                                        const period = hours >= 12 ? 'PM' : 'AM';
+                                        const displayHours = hours > 12 ? hours - 12 : hours === 0 ? 12 : hours;
+                                        return `${displayHours}:${mins.toString().padStart(2, '0')} ${period}`;
+                                      })()}
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+
                                 {/* Resize handle - Top */}
                                 <AnimatePresence>
-                                  {isFocused && (
+                                  {isFocused && !isBeingDragged && !isPreview && (
                                     <motion.div
                                       initial={{ opacity: 0, scale: 0 }}
                                       animate={{ opacity: 1, scale: 1 }}
                                       exit={{ opacity: 0, scale: 0 }}
-                                      className={`absolute -top-2 left-1/2 -translate-x-1/2 bg-white rounded-full cursor-ns-resize shadow-md z-20 ${isMobile ? 'w-8 h-8' : 'w-5 h-5'}`}
+                                      className={`absolute -top-2 left-1/2 -translate-x-1/2 bg-white rounded-full cursor-ns-resize shadow-md z-20 ${
+                                        isMobile ? 'w-11 h-11' : 'w-6 h-6'
+                                      } flex items-center justify-center border-2 border-blue-500`}
                                       style={{ touchAction: 'none' }}
-                                      onMouseDown={(e) => !isMobile && handleEventMouseDown(e, event.id, 'resize-top')}
+                                      onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        handleEventDragStart(e, event.id, 'resize-top');
+                                      }}
                                       onTouchStart={(e) => {
                                         if (isMobile) {
-                                          e.preventDefault();
+                                          e.stopPropagation();
                                           handleEventTouchStart(e, event.id, 'resize-top');
                                         }
                                       }}
-                                    />
+                                      title="Drag to change start time"
+                                    >
+                                      <div className="w-2 h-0.5 bg-blue-500 rounded" />
+                                    </motion.div>
                                   )}
                                 </AnimatePresence>
 
                                 {/* Resize handle - Bottom */}
                                 <AnimatePresence>
-                                  {isFocused && (
+                                  {isFocused && !isBeingDragged && !isPreview && (
                                     <motion.div
                                       initial={{ opacity: 0, scale: 0 }}
                                       animate={{ opacity: 1, scale: 1 }}
                                       exit={{ opacity: 0, scale: 0 }}
-                                      className={`absolute -bottom-2 left-1/2 -translate-x-1/2 bg-white rounded-full cursor-ns-resize shadow-md z-20 ${isMobile ? 'w-8 h-8' : 'w-5 h-5'}`}
+                                      className={`absolute -bottom-2 left-1/2 -translate-x-1/2 bg-white rounded-full cursor-ns-resize shadow-md z-20 ${
+                                        isMobile ? 'w-11 h-11' : 'w-6 h-6'
+                                      } flex items-center justify-center border-2 border-blue-500`}
                                       style={{ touchAction: 'none' }}
-                                      onMouseDown={(e) => !isMobile && handleEventMouseDown(e, event.id, 'resize-bottom')}
+                                      onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        handleEventDragStart(e, event.id, 'resize-bottom');
+                                      }}
                                       onTouchStart={(e) => {
                                         if (isMobile) {
-                                          e.preventDefault();
+                                          e.stopPropagation();
                                           handleEventTouchStart(e, event.id, 'resize-bottom');
                                         }
                                       }}
-                                    />
+                                      title="Drag to change end time"
+                                    >
+                                      <div className="w-2 h-0.5 bg-blue-500 rounded" />
+                                    </motion.div>
                                   )}
                                 </AnimatePresence>
                               </motion.div>
@@ -951,56 +1517,105 @@ export function AvailabilityPage({
 
           {/* Focused Event Actions */}
           <AnimatePresence>
-            {focusedEventId && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 20 }}
-                className="fixed bottom-8 left-1/2 -translate-x-1/2 flex gap-2 bg-white/95 backdrop-blur-md px-3 py-3 rounded-full shadow-xl border border-[#d4cfbe]/40 z-50"
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleDeleteEvent}
-                  className="text-red-500 hover:text-red-600 hover:bg-red-50 h-9 w-9"
+            {focusedEventId && (() => {
+              const focusedEvent = events.find(ev => ev.id === focusedEventId);
+              if (!focusedEvent) return null;
+              
+              const isCalendarEvent = focusedEvent.isFromCalendar;
+              
+              // Use preview times if dragging, otherwise use actual event times
+              const isBeingDragged = draggingEventId === focusedEventId;
+              const displayStartMinutes = isBeingDragged ? previewStartMinutes : focusedEvent.startMinutes;
+              const displayDurationMinutes = isBeingDragged ? previewDurationMinutes : focusedEvent.durationMinutes;
+              
+              // Calculate start and end times
+              const day = weekData[focusedEvent.dayIndex];
+              const timeSlotStart = day.timeSlots[0]?.start || '9:00 AM';
+              const baseHour = parseTimeToHours(timeSlotStart);
+              
+              const eventDate = new Date(day.date);
+              const totalStartMinutes = (baseHour * 60) + displayStartMinutes;
+              const startHours = Math.floor(totalStartMinutes / 60);
+              const startMins = totalStartMinutes % 60;
+              eventDate.setHours(startHours, startMins, 0, 0);
+              
+              const endDate = new Date(eventDate);
+              endDate.setMinutes(endDate.getMinutes() + displayDurationMinutes);
+              
+              const isPast = isPastEvent(endDate);
+              
+              // Format times for display
+              const formatTime = (date: Date) => {
+                const hours = date.getHours();
+                const mins = date.getMinutes();
+                const period = hours >= 12 ? 'PM' : 'AM';
+                const displayHours = hours > 12 ? hours - 12 : hours === 0 ? 12 : hours;
+                return `${displayHours}:${mins.toString().padStart(2, '0')} ${period}`;
+              };
+              
+              const startTimeStr = formatTime(eventDate);
+              const endTimeStr = formatTime(endDate);
+              
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 20 }}
+                  className="fixed bottom-4 md:bottom-8 left-1/2 -translate-x-1/2 flex gap-1.5 md:gap-2 bg-white/95 backdrop-blur-md px-3 md:px-4 py-2 md:py-3 rounded-2xl shadow-xl border border-[#d4cfbe]/40 z-50 max-w-[calc(100vw-2rem)] mx-4"
                 >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleExpandEvent}
-                  className="text-[#8b8475] hover:bg-[#e8e4d9]/60 h-9 w-9"
-                >
-                  <Expand className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setFocusedEventId(null)}
-                  className="text-[#a8a195] hover:bg-[#e8e4d9]/60 h-9 w-9"
-                >
-                  <span className="text-lg">✕</span>
-                </Button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Hold to Create Tooltip */}
-          <AnimatePresence>
-            {showHoldTooltip && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-                className="fixed top-20 left-1/2 -translate-x-1/2 pointer-events-none z-50"
-              >
-                <div className="bg-[#8b8475] text-white px-4 py-2 rounded-lg shadow-lg text-xs whitespace-nowrap">
-                  Keep holding to create event
-                </div>
-              </motion.div>
-            )}
+                    {isCalendarEvent && (
+                      <>
+                        {/* Edit button - disabled for past events */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={handleEditEvent}
+                          disabled={isPast}
+                          className="text-[#8b8475] hover:text-[#6b6558] hover:bg-[#e8e4d9]/60 h-8 w-8 md:h-9 md:w-9 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                          title={isPast ? "Cannot edit past events" : "Edit event"}
+                        >
+                          <Edit className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                        </Button>
+                        
+                        {/* Delete button */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={handleDeleteEvent}
+                          className="text-red-500 hover:text-red-600 hover:bg-red-50 h-8 w-8 md:h-9 md:w-9 flex-shrink-0"
+                          title="Delete event"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                        </Button>
+                        
+                        {/* Google Meet button */}
+                        {focusedEvent.meetLink && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => window.open(focusedEvent.meetLink, '_blank')}
+                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-8 w-8 md:h-9 md:w-9 flex-shrink-0"
+                            title="Join Google Meet"
+                          >
+                            <Video className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    
+                    {/* Close button (always shown) */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setFocusedEventId(null)}
+                      className="text-[#a8a195] hover:bg-[#e8e4d9]/60 h-8 w-8 md:h-9 md:w-9 flex-shrink-0"
+                      title="Close"
+                    >
+                      <span className="text-base md:text-lg">✕</span>
+                    </Button>
+                </motion.div>
+              );
+            })()}
           </AnimatePresence>
 
           {/* Delete Confirmation Dialog */}
@@ -1025,6 +1640,16 @@ export function AvailabilityPage({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+
+          {/* Event Form Modal */}
+          <EventFormModal
+            isOpen={eventActions.isFormOpen}
+            onClose={eventActions.closeForm}
+            onSubmit={eventActions.handleFormSubmit}
+            initialData={eventActions.formInitialData}
+            isLoading={eventActions.isLoading}
+            mode={eventActions.editingEventId ? 'edit' : 'create'}
+          />
         </motion.div>
       </div>
     </motion.div>

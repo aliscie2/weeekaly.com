@@ -1,11 +1,39 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query';
 import App from "./App";
 import "./index.css";
 
-// Create a client
+// Development mode flag
+const isDevelopment = import.meta.env.DEV;
+
+// Create a client with event logging (development only)
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      // Only log errors in development
+      if (isDevelopment) {
+        console.error('🔴 [React Query] Query Error:', {
+          queryKey: query.queryKey,
+          error,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    },
+  }),
+  mutationCache: new MutationCache({
+    onError: (error, variables, context, mutation) => {
+      // Only log errors in development
+      if (isDevelopment) {
+        console.error('🔴 [React Query] Mutation Error:', {
+          mutationKey: mutation.options.mutationKey,
+          error,
+          variables,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    },
+  }),
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false, // Prevent refetch on window focus

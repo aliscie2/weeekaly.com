@@ -188,8 +188,51 @@ export async function loginWithOAuth(
         if (code) {
           console.log('✅ [OAuth] Received authorization code for Calendar API access');
           console.log('📝 [OAuth] Code preview:', code.substring(0, 20) + '...');
-          // Store the code temporarily - in production, exchange this for access token on backend
+          // Store the code temporarily
           localStorage.setItem('ic-oauth-code', code);
+          
+          // Exchange code for tokens and store in backend
+          if (codeVerifier) {
+            try {
+              const redirectUri = `${window.location.origin}${AUTH_CONSTANTS.OAUTH_CALLBACK_PATH}`;
+              console.log('🔄 [OAuth] Exchanging authorization code for access tokens...');
+              
+              const tokenResult = await backendActor.exchange_oauth_code({
+                code,
+                code_verifier: codeVerifier,
+                redirect_uri: redirectUri,
+              });
+              
+              if ('Ok' in tokenResult) {
+                console.log('✅ [OAuth] Tokens exchanged and stored in backend successfully!');
+                console.log('📊 [OAuth] Token info:', {
+                  hasAccessToken: !!tokenResult.Ok.access_token,
+                  hasRefreshToken: tokenResult.Ok.refresh_token && tokenResult.Ok.refresh_token.length > 0,
+                  expiresIn: tokenResult.Ok.expires_in,
+                });
+                
+                // Store tokens in localStorage for frontend use
+                localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_ACCESS_TOKEN, tokenResult.Ok.access_token);
+                
+                const refreshToken = Array.isArray(tokenResult.Ok.refresh_token) && tokenResult.Ok.refresh_token.length > 0
+                  ? tokenResult.Ok.refresh_token[0]
+                  : undefined;
+                if (refreshToken) {
+                  localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_REFRESH_TOKEN, refreshToken);
+                }
+                
+                const expiryTime = Date.now() + Number(tokenResult.Ok.expires_in) * 1000;
+                localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_TOKEN_EXPIRY, expiryTime.toString());
+                
+                // Clear the temporary code
+                localStorage.removeItem('ic-oauth-code');
+              } else {
+                console.error('❌ [OAuth] Failed to exchange code for tokens:', tokenResult.Err);
+              }
+            } catch (error) {
+              console.error('❌ [OAuth] Error during token exchange:', error);
+            }
+          }
         } else {
           console.warn('⚠️ [OAuth] No authorization code received - Calendar API access will not work');
           console.log('🔍 [OAuth] Response type was:', provider.response_type);

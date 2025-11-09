@@ -6,8 +6,21 @@ import { Card } from './ui/card';
 import { ScrollArea } from './ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { Badge } from './ui/badge';
-import { Clock, Video, Sparkles, Calendar as CalendarIcon, ArrowLeft, Trash2, XCircle } from 'lucide-react';
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle 
+} from './ui/alert-dialog';
+import { Clock, Video, Sparkles, Calendar as CalendarIcon, ArrowLeft, Trash2, XCircle, Edit } from 'lucide-react';
 import { format, isToday, isThisWeek, isThisMonth, isPast, isFuture } from 'date-fns';
+import { EventFormModal } from './EventFormModal';
+import { useEventActions } from '../hooks/useEventActions';
+import { useCalendarEvents } from '../hooks/useBackend';
 
 export interface EventAttendee {
   id: string;
@@ -30,18 +43,42 @@ export interface Event {
 }
 
 interface EventsPageProps {
-  events: Event[];
   onEventClick: (eventId: string) => void;
   onBack: () => void;
   currentUserId: string;
-  onCancelEvent: (eventId: string) => void;
-  onDeleteEvent: (eventId: string) => void;
-  onCreateEvent: () => void;
-  onQuickGathering: () => void;
 }
 
-export function EventsPage({ events, onEventClick, onBack, currentUserId, onCancelEvent, onDeleteEvent, onCreateEvent, onQuickGathering }: EventsPageProps) {
+export function EventsPage({ onEventClick, onBack, currentUserId }: EventsPageProps) {
   const [activeFilter, setActiveFilter] = useState<'today' | 'week' | 'month' | 'past'>('today');
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    eventId: string;
+    eventTitle: string;
+  } | null>(null);
+  
+  // Fetch events from Google Calendar
+  const { data: googleEvents = [], isLoading: isLoadingEvents } = useCalendarEvents(true);
+  
+  // Use event actions hook
+  const eventActions = useEventActions();
+  
+  // Convert Google Calendar events to our Event format
+  const events: Event[] = googleEvents.map((gEvent) => ({
+    id: gEvent.id,
+    title: gEvent.summary || 'Untitled Event',
+    startTime: new Date(gEvent.start?.dateTime || gEvent.start?.date),
+    endTime: new Date(gEvent.end?.dateTime || gEvent.end?.date),
+    attendees: (gEvent.attendees || []).map((a: any) => ({
+      id: a.email,
+      name: a.displayName || a.email,
+      email: a.email,
+      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(a.displayName || a.email)}&background=8b8475&color=fff`,
+    })),
+    meetLink: gEvent.hangoutLink,
+    aiSummary: gEvent.description || 'No description available',
+    thumbnail: 'https://images.unsplash.com/photo-1431540015161-0bf868a2d407?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxidXNpbmVzcyUyMG1lZXRpbmclMjByb29tfGVufDF8fHx8MTc2MjA1ODY0MHww&ixlib=rb-4.1.0&q=80&w=1080',
+    location: gEvent.location,
+    createdBy: gEvent.creator?.self ? currentUserId : 'other',
+  }));
 
   const filterEvents = (filter: 'today' | 'week' | 'month' | 'past') => {
     return events.filter(event => {
@@ -49,12 +86,16 @@ export function EventsPage({ events, onEventClick, onBack, currentUserId, onCanc
       
       switch (filter) {
         case 'today':
-          return isToday(eventDate) || (isFuture(eventDate) && !isThisWeek(eventDate));
+          // Show only events happening today
+          return isToday(eventDate);
         case 'week':
-          return isThisWeek(eventDate) && isFuture(eventDate);
+          // Show events this week (including today)
+          return isThisWeek(eventDate) && !isPast(eventDate);
         case 'month':
-          return isThisMonth(eventDate) && isFuture(eventDate);
+          // Show events this month (including today and this week)
+          return isThisMonth(eventDate) && !isPast(eventDate);
         case 'past':
+          // Show past events (not including today)
           return isPast(eventDate) && !isToday(eventDate);
         default:
           return true;
@@ -109,20 +150,13 @@ export function EventsPage({ events, onEventClick, onBack, currentUserId, onCanc
           <h1 className="text-2xl md:text-3xl text-[#8b8475] mb-2">My Events</h1>
           <div className="flex flex-wrap gap-2 mt-3">
             <Button
-              onClick={onCreateEvent}
+              onClick={() => eventActions.openCreateForm()}
+              disabled={eventActions.isLoading}
               className="bg-[#8b8475] hover:bg-[#6b6558] text-[#f5f3ef] h-9 px-4 text-sm"
             >
               <CalendarIcon className="h-4 w-4 mr-2" />
               Create New Event
             </Button>
-            {/* TODO future feature <Button
-              onClick={onQuickGathering}
-              variant="outline"
-              className="bg-[#e8e4d9]/60 hover:bg-[#8b8475] text-[#8b8475] hover:text-[#f5f3ef] border-[#d4cfbe]/40 h-9 px-4 text-sm"
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Quick Gathering
-            </Button> */}
           </div>
         </motion.div>
 
@@ -158,7 +192,15 @@ export function EventsPage({ events, onEventClick, onBack, currentUserId, onCanc
           <TabsContent value={activeFilter} className="flex-1 overflow-hidden mt-0">
             <ScrollArea className="h-full pr-2">
               <div className="space-y-3">
-                {filteredEvents.length === 0 ? (
+                {isLoadingEvents ? (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-center py-12 text-[#a8a195]"
+                  >
+                    Loading events...
+                  </motion.div>
+                ) : filteredEvents.length === 0 ? (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -175,8 +217,7 @@ export function EventsPage({ events, onEventClick, onBack, currentUserId, onCanc
                       transition={{ delay: index * 0.05, duration: 0.4 }}
                     >
                       <Card
-                        onClick={() => onEventClick(event.id)}
-                        className="bg-white/60 border-[#d4cfbe]/40 hover:shadow-lg transition-all cursor-pointer overflow-hidden"
+                        className="bg-white/60 border-[#d4cfbe]/40 hover:shadow-lg transition-all overflow-hidden"
                       >
                         <div className="flex gap-3 p-3 md:p-4">
                           {/* Thumbnail */}
@@ -252,16 +293,42 @@ export function EventsPage({ events, onEventClick, onBack, currentUserId, onCanc
                                   </Button>
                                 )}
                                 
+                                {/* Edit Button (only for own events) */}
+                                {event.createdBy === currentUserId && (
+                                  <Button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      eventActions.openEditForm(event.id, {
+                                        summary: event.title,
+                                        description: event.aiSummary,
+                                        start: event.startTime,
+                                        end: event.endTime,
+                                        location: event.location,
+                                        attendees: event.attendees.map(a => ({ email: a.email, displayName: a.name })),
+                                        conferenceData: !!event.meetLink, // Preserve existing Meet link
+                                      });
+                                    }}
+                                    size="sm"
+                                    variant="outline"
+                                    className="bg-green-50 hover:bg-green-100 text-green-600 hover:text-green-700 border-green-200 h-7 px-2 text-xs"
+                                    disabled={eventActions.isLoading}
+                                  >
+                                    <Edit className="h-3 w-3 mr-1" />
+                                    Edit
+                                  </Button>
+                                )}
+                                
                                 {/* Delete or Cancel Button */}
                                 {event.createdBy === currentUserId ? (
                                   <Button
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      onDeleteEvent(event.id);
+                                      setDeleteConfirm({ eventId: event.id, eventTitle: event.title });
                                     }}
                                     size="sm"
                                     variant="outline"
                                     className="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 border-red-200 h-7 px-2 text-xs"
+                                    disabled={eventActions.isLoading}
                                   >
                                     <Trash2 className="h-3 w-3 mr-1" />
                                     Delete
@@ -270,11 +337,12 @@ export function EventsPage({ events, onEventClick, onBack, currentUserId, onCanc
                                   <Button
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      onCancelEvent(event.id);
+                                      eventActions.handleCancelAttendance(event.id, event.title);
                                     }}
                                     size="sm"
                                     variant="outline"
                                     className="bg-orange-50 hover:bg-orange-100 text-orange-600 hover:text-orange-700 border-orange-200 h-7 px-2 text-xs"
+                                    disabled={eventActions.isLoading}
                                   >
                                     <XCircle className="h-3 w-3 mr-1" />
                                     Cancel
@@ -293,6 +361,44 @@ export function EventsPage({ events, onEventClick, onBack, currentUserId, onCanc
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Event Form Modal */}
+      <EventFormModal
+        isOpen={eventActions.isFormOpen}
+        onClose={eventActions.closeForm}
+        onSubmit={eventActions.handleFormSubmit}
+        initialData={eventActions.formInitialData}
+        isLoading={eventActions.isLoading}
+        mode={eventActions.editingEventId ? 'edit' : 'create'}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
+        <AlertDialogContent className="bg-white border-[#d4cfbe]/40">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-[#8b8475]">Delete Event?</AlertDialogTitle>
+            <AlertDialogDescription className="text-[#a8a195]">
+              Are you sure you want to delete "{deleteConfirm?.eventTitle}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-[#d4cfbe]/40 text-[#8b8475] hover:bg-[#e8e4d9]/60">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteConfirm) {
+                  eventActions.handleDeleteEvent(deleteConfirm.eventId, deleteConfirm.eventTitle);
+                  setDeleteConfirm(null);
+                }
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </motion.div>
   );
 }

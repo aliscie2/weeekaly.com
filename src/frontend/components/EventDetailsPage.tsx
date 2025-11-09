@@ -34,6 +34,20 @@ interface EventDetailsPageProps {
 }
 
 export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back to Events' }: EventDetailsPageProps) {
+  // Guard against undefined event
+  if (!event) {
+    return (
+      <div className="min-h-screen bg-[#f5f3ef] flex items-center justify-center p-4">
+        <Card className="bg-white/60 border-[#d4cfbe]/40 shadow-lg p-8 text-center">
+          <p className="text-[#8b8475] mb-4">Event not found</p>
+          <Button onClick={onBack} variant="outline">
+            {backButtonText}
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
   const [isEditing, setIsEditing] = useState(false);
   const [editedEvent, setEditedEvent] = useState<Event>(event);
 
@@ -171,10 +185,12 @@ export function EventDetailsPage({ event, onBack, onSave, backButtonText = 'Back
         >
           <Card className="bg-white/60 border-[#d4cfbe]/40 shadow-lg mb-6 overflow-hidden">
             {/* Hero Image */}
-            <div 
-              className="w-full h-48 md:h-64 bg-cover bg-center"
-              style={{ backgroundImage: `url(${event.thumbnail})` }}
-            />
+            {event.thumbnail && (
+              <div 
+                className="w-full h-48 md:h-64 bg-cover bg-center"
+                style={{ backgroundImage: `url(${event.thumbnail})` }}
+              />
+            )}
 
             <div className="p-6 md:p-8">
               {/* Title and Status */}

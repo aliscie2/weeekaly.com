@@ -154,8 +154,6 @@ export default function App() {
   // Update backend actor when identity changes (login or restore from storage)
   useEffect(() => {
     if (isAuthenticated && identity) {
-      console.log('✅ [App] User is authenticated');
-      
       // Update the backend actor with the authenticated identity
       setAuthenticatedActor(identity);
       
@@ -165,39 +163,11 @@ export default function App() {
         return backendActor.get_user_info();
       }).then(async (userInfo) => {
         // Log stored user data from OAuth (localStorage)
-        const userEmail = localStorage.getItem('ic-user-email');
-        const userName = localStorage.getItem('ic-user-name');
-        const userId = localStorage.getItem('ic-user-id');
-        const userPicture = localStorage.getItem('ic-user-picture');
-        
-        console.log({
-          event: '📋 USER INFORMATION (After Login/Restore)',
-          email: {
-            localStorage: userEmail || 'Not available',
-            backend: userInfo.email || 'Not available'
-          },
-          name: {
-            localStorage: userName || 'Not available',
-            backend: userInfo.name || 'Not available'
-          },
-          userId: {
-            localStorage: userId || 'Not available',
-            backend: userInfo.user_id || 'Not available'
-          },
-          picture: userPicture || 'Not available',
-          principal: userInfo.principal,
-          calendar: {
-            note: '📅 Calendar events will be loaded by React Query hook'
-          }
-        });
-        
         // Trigger calendar events fetch via React Query (removes redundant fetch)
         queryClient.invalidateQueries({ queryKey: ['calendar-events'] });
-      }).catch((error) => {
-        console.error('❌ [App] Failed to get user info:', error);
+      }).catch(() => {
+        // Silently handle error
       });
-    } else if (!authLoading) {
-      console.log('⚠️ [App] User is NOT authenticated');
     }
   }, [isAuthenticated, identity, authLoading]);
   
@@ -209,30 +179,11 @@ export default function App() {
     isAuthenticated // Only poll when user is authenticated
   );
   
-  // Log the message when it's available
-  useEffect(() => {
-    if (backendMessage) {
-      console.log(backendMessage);
-    }
-  }, [backendMessage]);
-  
-  // Log when calendar events are fetched
-  useEffect(() => {
-    if (calendarEventsFromBackend) {
-      console.log('📅 [Calendar] Events updated:', {
-        timestamp: new Date().toISOString(),
-        events: calendarEventsFromBackend,
-        count: calendarEventsFromBackend.length
-      });
-    }
-  }, [calendarEventsFromBackend]);
-  
   const [currentView, setCurrentView] = useState<'landing' | 'contact' | 'availability' | 'profile' | 'avatarEdit' | 'events' | 'eventDetails' | 'deleteConfirmation' | 'eventDeleteConfirmation' | 'quickGathering'>('landing');
   
   // Automatically switch to contact view when user is authenticated (on mount or after login)
   useEffect(() => {
     if (isAuthenticated && !authLoading && currentView === 'landing') {
-      console.log('✅ [App] User authenticated - switching from landing to contact view');
       setCurrentView('contact');
     }
   }, [isAuthenticated, authLoading, currentView]);
@@ -815,8 +766,6 @@ Next Steps:
   };
 
   const handleLogout = () => {
-    console.log('🚪 [App] Logging out user');
-    
     // Clear all user data and session (handled by hook)
     logoutOAuth();
     
@@ -895,7 +844,6 @@ Next Steps:
         setCurrentView('profile');
       }
     } catch (e) {
-      console.error(e);
       toast.error('Failed to update avatar');
     }
   };
@@ -1693,14 +1641,9 @@ Next Steps:
       {/* Events List View */}
       {currentView === 'events' && (
         <EventsPage
-          events={events}
           onEventClick={handleEventClick}
           onBack={() => setCurrentView('contact')}
           currentUserId={CURRENT_USER_ID}
-          onCancelEvent={handleCancelEvent}
-          onDeleteEvent={handleDeleteEvent}
-          onCreateEvent={handleCreateNewEvent}
-          onQuickGathering={handleQuickGathering}
         />
       )}
 

@@ -52,7 +52,7 @@ export interface GoogleCalendarEvent {
 interface TokenData {
   access_token: string;
   refresh_token?: string;
-  expires_in: number;
+  expires_in: number | bigint;
   token_type: string;
 }
 
@@ -105,16 +105,27 @@ export async function exchangeCodeForToken(code: string): Promise<TokenData> {
     
     // Store tokens locally
     localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_ACCESS_TOKEN, tokens.access_token);
-    if (tokens.refresh_token) {
-      localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_REFRESH_TOKEN, tokens.refresh_token);
+    
+    // Handle optional refresh_token (Candid optional is [] | [value])
+    const refreshToken = Array.isArray(tokens.refresh_token) && tokens.refresh_token.length > 0 
+      ? tokens.refresh_token[0] 
+      : undefined;
+    if (refreshToken) {
+      localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_REFRESH_TOKEN, refreshToken);
     }
+    
     const expiryTime = Date.now() + Number(tokens.expires_in) * 1000;
     localStorage.setItem(AUTH_CONSTANTS.STORAGE_KEY_TOKEN_EXPIRY, expiryTime.toString());
 
     // Clear code verifier
     sessionStorage.removeItem('pkce_verifier');
 
-    return tokens;
+    return {
+      access_token: tokens.access_token,
+      refresh_token: refreshToken,
+      expires_in: Number(tokens.expires_in),
+      token_type: tokens.token_type,
+    };
   } catch (error) {
     logger.error('❌ [Calendar] Token exchange failed:', error);
     throw error;
@@ -321,5 +332,298 @@ export async function fetchGoogleCalendars(): Promise<any[]> {
   } catch (error) {
     logger.error('❌ [Calendar] Failed to fetch calendars:', error);
     return [];
+  }
+}
+
+// ============================================================================
+// TIMEZONE UTILITIES
+// ============================================================================
+
+/**
+ * Get user's timezone
+ */
+export function getUserTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+/**
+ * Convert Date object to Google Calendar dateTime format
+ * @param date - JavaScript Date object
+ * @param timezone - IANA timezone (e.g., 'America/New_York')
+ * @returns Object with dateTime and timeZone
+ */
+export function convertToGoogleDateTime(date: Date, timezone?: string): { dateTime: string; timeZone: string } {
+  const tz = timezone || getUserTimezone();
+  
+  // Format: 2025-10-04T12:00:00+03:00
+  const isoString = date.toISOString();
+  
+  return {
+    dateTime: isoString,
+    timeZone: tz,
+  };
+}
+
+/**
+ * Convert Google Calendar dateTime to JavaScript Date
+ * @param googleDateTime - Google Calendar dateTime string
+ * @returns JavaScript Date object
+ */
+export function convertFromGoogleDateTime(googleDateTime: string): Date {
+  return new Date(googleDateTime);
+}
+
+// ============================================================================
+// EVENT CRUD OPERATIONS
+// ============================================================================
+
+export interface CreateEventInput {
+  summary: string;
+  description?: string;
+  start: Date;
+  end: Date;
+  attendees?: Array<{ email: string; displayName?: string }>;
+  location?: string;
+  conferenceData?: boolean; // If true, creates Google Meet link
+  reminders?: {
+    useDefault: boolean;
+    overrides?: Array<{
+      method: 'email' | 'popup';
+      minutes: number;
+    }>;
+  };
+}
+
+export interface UpdateEventInput {
+  summary?: string;
+  description?: string;
+  start?: Date;
+  end?: Date;
+  attendees?: Array<{ email: string; displayName?: string }>;
+  location?: string;
+  status?: 'confirmed' | 'tentative' | 'cancelled';
+  conferenceData?: boolean; // If true, adds Google Meet link
+}
+
+/**
+ * Create a new event in Google Calendar
+ */
+export async function createGoogleCalendarEvent(input: CreateEventInput): Promise<GoogleCalendarEvent> {
+  logger.info('📝 [Calendar] Creating event:', {
+    summary: input.summary,
+    start: input.start.toISOString(),
+    end: input.end.toISOString(),
+    timezone: getUserTimezone(),
+  });
+
+  const accessToken = await getValidAccessToken();
+
+  if (!accessToken) {
+    throw new Error('No valid access token available');
+  }
+
+  const timezone = getUserTimezone();
+  
+  // Build event object
+  const eventData: any = {
+    summary: input.summary,
+    description: input.description,
+    start: convertToGoogleDateTime(input.start, timezone),
+    end: convertToGoogleDateTime(input.end, timezone),
+    location: input.location,
+    reminders: input.reminders || {
+      useDefault: true,
+    },
+  };
+
+  // Add attendees if provided
+  if (input.attendees && input.attendees.length > 0) {
+    eventData.attendees = input.attendees.map(a => ({
+      email: a.email,
+      displayName: a.displayName,
+    }));
+  }
+
+  // Add conference data (Google Meet) if requested
+  if (input.conferenceData) {
+    eventData.conferenceData = {
+      createRequest: {
+        requestId: `meet-${Date.now()}`,
+        conferenceSolutionKey: { type: 'hangoutsMeet' },
+      },
+    };
+  }
+
+  try {
+    const url = input.conferenceData
+      ? 'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1'
+      : 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(eventData),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`Failed to create event: ${error.error?.message || 'Unknown error'}`);
+    }
+
+    const createdEvent = await response.json();
+    logger.info('✅ [Calendar] Event created successfully:', {
+      id: createdEvent.id,
+      summary: createdEvent.summary,
+      htmlLink: createdEvent.htmlLink,
+    });
+
+    return createdEvent;
+  } catch (error) {
+    logger.error('❌ [Calendar] Failed to create event:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update an existing event in Google Calendar
+ */
+export async function updateGoogleCalendarEvent(
+  eventId: string,
+  updates: UpdateEventInput
+): Promise<GoogleCalendarEvent> {
+  logger.info('📝 [Calendar] Updating event:', {
+    eventId,
+    updates,
+  });
+
+  const accessToken = await getValidAccessToken();
+
+  if (!accessToken) {
+    throw new Error('No valid access token available');
+  }
+
+  const timezone = getUserTimezone();
+  
+  // Build update object
+  const updateData: any = {};
+
+  if (updates.summary !== undefined) updateData.summary = updates.summary;
+  if (updates.description !== undefined) updateData.description = updates.description;
+  if (updates.location !== undefined) updateData.location = updates.location;
+  if (updates.status !== undefined) updateData.status = updates.status;
+  
+  if (updates.start) {
+    updateData.start = convertToGoogleDateTime(updates.start, timezone);
+  }
+  
+  if (updates.end) {
+    updateData.end = convertToGoogleDateTime(updates.end, timezone);
+  }
+
+  if (updates.attendees) {
+    updateData.attendees = updates.attendees.map(a => ({
+      email: a.email,
+      displayName: a.displayName,
+    }));
+  }
+
+  // Add conference data (Google Meet) if requested
+  if (updates.conferenceData) {
+    updateData.conferenceData = {
+      createRequest: {
+        requestId: `meet-${Date.now()}`,
+        conferenceSolutionKey: { type: 'hangoutsMeet' },
+      },
+    };
+    
+    logger.info('📹 [Calendar] Adding Google Meet to update:', {
+      eventId,
+      conferenceData: updateData.conferenceData,
+    });
+  }
+
+  try {
+    // Use conferenceDataVersion=1 if adding Google Meet
+    const url = updates.conferenceData
+      ? `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?conferenceDataVersion=1`
+      : `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`;
+
+    logger.info('🌐 [Calendar] Sending update request:', {
+      url,
+      method: 'PATCH',
+      body: updateData,
+    });
+
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(updateData),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`Failed to update event: ${error.error?.message || 'Unknown error'}`);
+    }
+
+    const updatedEvent = await response.json();
+    logger.info('✅ [Calendar] Event updated successfully:', {
+      id: updatedEvent.id,
+      summary: updatedEvent.summary,
+      hasHangoutLink: !!updatedEvent.hangoutLink,
+      hangoutLink: updatedEvent.hangoutLink,
+      conferenceData: updatedEvent.conferenceData,
+    });
+
+    if (updates.conferenceData && !updatedEvent.hangoutLink) {
+      logger.error('⚠️ [Calendar] Google Meet was requested but no hangoutLink in response!', {
+        response: updatedEvent,
+      });
+    }
+
+    return updatedEvent;
+  } catch (error) {
+    logger.error('❌ [Calendar] Failed to update event:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete an event from Google Calendar
+ */
+export async function deleteGoogleCalendarEvent(eventId: string): Promise<void> {
+  logger.info('🗑️ [Calendar] Deleting event:', { eventId });
+
+  const accessToken = await getValidAccessToken();
+
+  if (!accessToken) {
+    throw new Error('No valid access token available');
+  }
+
+  try {
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    if (!response.ok && response.status !== 204) {
+      const error = await response.json();
+      throw new Error(`Failed to delete event: ${error.error?.message || 'Unknown error'}`);
+    }
+
+    logger.info('✅ [Calendar] Event deleted successfully:', { eventId });
+  } catch (error) {
+    logger.error('❌ [Calendar] Failed to delete event:', error);
+    throw error;
   }
 }

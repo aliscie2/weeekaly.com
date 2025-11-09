@@ -8,6 +8,7 @@ import { Separator } from './ui/separator';
 import { ScrollArea } from './ui/scroll-area';
 import { Input } from './ui/input';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface GoogleAccount {
   id: string;
@@ -49,6 +50,44 @@ export function ProfilePage({
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedUsername, setEditedUsername] = useState(username);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
+
+  /**
+   * Handle logout with complete cleanup
+   * Clears all cached data and stored user information
+   */
+  const handleLogoutWithCleanup = () => {
+    // 1. Clear React Query cache (all calendar events, etc.)
+    queryClient.clear();
+    
+    // 2. Remove all queries to prevent any cached data from being used
+    queryClient.removeQueries();
+    
+    // 3. Clear localStorage completely (not just calendar_user_email)
+    localStorage.clear();
+    
+    // 4. Clear sessionStorage (PKCE verifier, etc.)
+    sessionStorage.clear();
+    
+    // 5. Clear any IndexedDB data (if used by React Query)
+    if (window.indexedDB) {
+      window.indexedDB.databases().then((dbs) => {
+        dbs.forEach((db) => {
+          if (db.name) {
+            window.indexedDB.deleteDatabase(db.name);
+          }
+        });
+      }).catch(() => {
+        // Silently fail if IndexedDB cleanup fails
+      });
+    }
+    
+    // 6. Show success message
+    toast.success('Logged out successfully');
+    
+    // 7. Call the original logout handler
+    onLogout();
+  };
 
   const handleEditName = () => {
     setIsEditingName(true);
@@ -196,7 +235,7 @@ export function ProfilePage({
 
             {/* Logout Button */}
             <Button
-              onClick={onLogout}
+              onClick={handleLogoutWithCleanup}
               variant="outline"
               className="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
             >
