@@ -3,7 +3,6 @@ import { motion } from "motion/react";
 import { useNavigate } from "react-router-dom";
 import { ChatMessage } from "../components/ChatMessage";
 import { ChatInput } from "../components/ChatInput";
-import { Progress } from "../components/ui/progress";
 import {
   Calendar,
   User,
@@ -21,6 +20,8 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "../components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
+import { AUTH_CONSTANTS } from "../utils/authConstants";
 
 interface Message {
   id: string;
@@ -142,10 +143,23 @@ export function ContactPage({
   const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [progress, setProgress] = useState(0);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasInitialized = useRef(false);
+
+  // Get Google user avatar from localStorage
+  const [userAvatar, setUserAvatar] = useState("");
+  const [userName, setUserName] = useState("");
+
+  useEffect(() => {
+    const picture =
+      localStorage.getItem(AUTH_CONSTANTS.STORAGE_KEY_USER_PICTURE) || "";
+    const name =
+      localStorage.getItem(AUTH_CONSTANTS.STORAGE_KEY_USER_NAME) || "";
+    setUserAvatar(picture);
+    setUserName(name);
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -156,7 +170,9 @@ export function ContactPage({
   }, [messages]);
 
   useEffect(() => {
-    if (messages.length === 0) {
+    // Only add welcome message once, even in React Strict Mode
+    if (!hasInitialized.current && messages.length === 0) {
+      hasInitialized.current = true;
       setTimeout(() => {
         addAiMessage(QUESTIONS[0]);
       }, 800);
@@ -186,12 +202,6 @@ export function ContactPage({
       },
     ]);
 
-    const newProgress = Math.min(
-      100,
-      ((currentQuestion + 1) / QUESTIONS.length) * 100,
-    );
-    setProgress(newProgress);
-
     setTimeout(() => {
       if (currentQuestion < QUESTIONS.length - 1) {
         setCurrentQuestion((prev) => prev + 1);
@@ -210,6 +220,9 @@ export function ContactPage({
       addUserMessage(text);
     }
   };
+
+  // Check if user has sent any messages
+  const hasUserMessages = messages.some((msg) => !msg.isAi);
 
   return (
     <>
@@ -392,61 +405,87 @@ export function ContactPage({
               <Button
                 onClick={() => navigate("/profile")}
                 variant="outline"
-                className="bg-[#e8e4d9]/60 hover:bg-[#8b8475] text-[#8b8475] hover:text-[#f5f3ef] border-[#d4cfbe]/40 transition-all duration-300 h-8 md:h-10 px-2 md:px-4 text-xs md:text-sm"
+                className="bg-[#e8e4d9]/60 hover:bg-[#8b8475] text-[#8b8475] hover:text-[#f5f3ef] border-[#d4cfbe]/40 transition-all duration-300 h-8 md:h-10 px-2 md:px-4 text-xs md:text-sm flex items-center gap-2"
               >
-                <User className="h-3 w-3 md:h-4 md:w-4 md:mr-2" />
+                {userAvatar ? (
+                  <Avatar className="h-5 w-5 md:h-6 md:w-6">
+                    <AvatarImage src={userAvatar} alt={userName} />
+                    <AvatarFallback className="bg-[#8b8475] text-white text-xs">
+                      {userName.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                ) : (
+                  <User className="h-3 w-3 md:h-4 md:w-4" />
+                )}
                 <span className="hidden sm:inline">Profile</span>
               </Button>
             </div>
           </div>
-
-          {/* Progress bar */}
-          <>
-            <div
-              className="flex items-center justify-end mb-2"
-              style={{ display: progress >= 100 ? "none" : "flex" }}
-            >
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="text-sm text-[#a8a195]"
-              >
-                {Math.round(progress)}% Complete
-              </motion.div>
-            </div>
-            <Progress value={progress} className="h-1 bg-[#e0ddd1]" />
-          </>
         </div>
       </motion.header>
 
-      {/* Messages */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: isInputFocused ? 0.7 : 1 }}
-        transition={{ duration: 0.3 }}
-        className="flex-1 overflow-y-auto px-4 md:px-8 py-8"
-      >
-        <div className="max-w-4xl mx-auto space-y-6 pb-8">
-          {messages.map((message) => (
-            <ChatMessage
-              key={message.id}
-              message={message}
-              isHovered={hoveredId === message.id}
-              onHover={setHoveredId}
-              isOtherHovered={hoveredId !== null && hoveredId !== message.id}
-            />
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
-      </motion.div>
+      {/* Messages and Input - Centered when no user messages */}
+      {!hasUserMessages ? (
+        <div className="flex-1 flex flex-col items-center justify-center px-4 md:px-8 py-8">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: isInputFocused ? 0.7 : 1 }}
+            transition={{ duration: 0.3 }}
+            className="w-full max-w-4xl space-y-6"
+          >
+            {messages.map((message) => (
+              <ChatMessage
+                key={message.id}
+                message={message}
+                isHovered={hoveredId === message.id}
+                onHover={setHoveredId}
+                isOtherHovered={hoveredId !== null && hoveredId !== message.id}
+              />
+            ))}
+          </motion.div>
 
-      {/* Input */}
-      <ChatInput
-        onSendMessage={handleSendMessage}
-        onFocusChange={setIsInputFocused}
-        showSuggestions={currentQuestion < QUESTIONS.length}
-      />
+          <div className="w-full max-w-4xl mt-8">
+            <ChatInput
+              onSendMessage={handleSendMessage}
+              onFocusChange={setIsInputFocused}
+              showSuggestions={currentQuestion < QUESTIONS.length}
+              isCentered={true}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Messages */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: isInputFocused ? 0.7 : 1 }}
+            transition={{ duration: 0.3 }}
+            className="flex-1 overflow-y-auto px-4 md:px-8 py-8"
+          >
+            <div className="max-w-4xl mx-auto space-y-6 pb-8">
+              {messages.map((message) => (
+                <ChatMessage
+                  key={message.id}
+                  message={message}
+                  isHovered={hoveredId === message.id}
+                  onHover={setHoveredId}
+                  isOtherHovered={
+                    hoveredId !== null && hoveredId !== message.id
+                  }
+                />
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          </motion.div>
+
+          {/* Input */}
+          <ChatInput
+            onSendMessage={handleSendMessage}
+            onFocusChange={setIsInputFocused}
+            showSuggestions={currentQuestion < QUESTIONS.length}
+          />
+        </>
+      )}
     </>
   );
 }

@@ -344,11 +344,15 @@ export function EventsPage({ currentUserId }: EventsPageProps) {
                             </div>
 
                             {/* Countdown Timer - Only show for today's events */}
-                            {activeFilter === "today" && isToday(event.startTime) && (
-                              <div className="mb-2">
-                                <CountdownTimer targetDate={event.startTime} />
-                              </div>
-                            )}
+                            {activeFilter === "today" &&
+                              isToday(event.startTime) && (
+                                <div className="mb-2">
+                                  <CountdownTimer
+                                    startDate={event.startTime}
+                                    endDate={event.endTime}
+                                  />
+                                </div>
+                              )}
 
                             {/* AI Summary */}
                             <div className="flex items-start gap-1 mb-3">

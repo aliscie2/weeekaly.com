@@ -25,14 +25,6 @@ import { DeleteConfirmationPage } from "./pages/DeleteConfirmationPage";
 import { QuickGatheringPage } from "./pages/QuickGatheringPage";
 
 // Types
-interface GoogleAccount {
-  id: string;
-  email: string;
-  name: string;
-  avatar: string;
-  isDefault: boolean;
-}
-
 interface Availability {
   id: string;
   name: string;
@@ -94,6 +86,13 @@ function AppContent() {
         })
         .then(async () => {
           queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
+
+          // Update profile with Google user data
+          const name = localStorage.getItem("ic-user-name") || "";
+          const picture = localStorage.getItem("ic-user-picture") || "";
+
+          if (name) setUsername(name);
+          if (picture) setUserAvatar(picture);
         })
         .catch(() => {
           // Silently handle error
@@ -250,24 +249,6 @@ function AppContent() {
     "Building amazing software solutions for businesses.",
   );
   const [avatarImageSrc, setAvatarImageSrc] = useState<string | null>(null);
-  const [googleAccounts, setGoogleAccounts] = useState<GoogleAccount[]>([
-    {
-      id: "1",
-      email: "john.doe@gmail.com",
-      name: "John Doe",
-      avatar:
-        "https://images.unsplash.com/photo-1581065178047-8ee15951ede6?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBidXNpbmVzcyUyMHBvcnRyYWl0fGVufDF8fHx8MTc2MjAzMzEwMHww&ixlib=rb-4.1.0&q=80&w=400",
-      isDefault: true,
-    },
-    {
-      id: "2",
-      email: "john.work@gmail.com",
-      name: "John Work",
-      avatar:
-        "https://images.unsplash.com/photo-1576558656222-ba66febe3dec?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwb3J0cmFpdCUyMHByb2Zlc3Npb25hbCUyMGhlYWRzaG90fGVufDF8fHx8MTc2MjAyNDQ4MHww&ixlib=rb-4.1.0&q=80&w=400",
-      isDefault: false,
-    },
-  ]);
 
   // Handle window resize
   useEffect(() => {
@@ -425,54 +406,8 @@ function AppContent() {
   );
 
   // Profile handlers
-  const handleSetDefaultAccount = (id: string) => {
-    setGoogleAccounts((accounts) =>
-      accounts.map((account) => ({
-        ...account,
-        isDefault: account.id === id,
-      })),
-    );
-    toast.success("Default account updated!");
-  };
-
-  const handleDeleteAccount = (id: string) => {
-    const accountToDelete = googleAccounts.find((acc) => acc.id === id);
-    if (accountToDelete?.isDefault) {
-      toast.error(
-        "Cannot delete the default account. Set another account as default first.",
-      );
-      return;
-    }
-    setGoogleAccounts((accounts) =>
-      accounts.filter((account) => account.id !== id),
-    );
-    toast.success("Account removed successfully!");
-  };
-
-  const handleAddAccount = () => {
-    const newAccount: GoogleAccount = {
-      id: Date.now().toString(),
-      email: `newaccount${googleAccounts.length}@gmail.com`,
-      name: `New Account ${googleAccounts.length}`,
-      avatar: `https://images.unsplash.com/photo-${1500000000000 + googleAccounts.length}?w=400&h=400&fit=crop`,
-      isDefault: false,
-    };
-    setGoogleAccounts((accounts) => [...accounts, newAccount]);
-    toast.success("New account added!");
-  };
-
   const handleUpdateDescription = (desc: string) => {
     setDescription(desc);
-  };
-
-  const handleUpdateUsername = (name: string) => {
-    setUsername(name);
-  };
-
-  // Avatar edit handlers
-  const handleStartAvatarEdit = (imageSrc: string) => {
-    setAvatarImageSrc(imageSrc);
-    navigate("/avatar-edit");
   };
 
   const createImage = (url: string): Promise<HTMLImageElement> =>
@@ -609,14 +544,8 @@ function AppContent() {
                 username={username}
                 userAvatar={userAvatar}
                 description={description}
-                googleAccounts={googleAccounts}
-                onSetDefaultAccount={handleSetDefaultAccount}
-                onDeleteAccount={handleDeleteAccount}
-                onAddAccount={handleAddAccount}
                 onLogout={handleLogout}
                 onUpdateDescription={handleUpdateDescription}
-                onUpdateUsername={handleUpdateUsername}
-                onStartAvatarEdit={handleStartAvatarEdit}
               />
             </ProtectedRoute>
           }

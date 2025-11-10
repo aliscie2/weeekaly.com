@@ -7,12 +7,14 @@ interface ChatInputProps {
   onSendMessage: (message: string) => void;
   onFocusChange: (focused: boolean) => void;
   showSuggestions: boolean;
+  isCentered?: boolean;
 }
 
 export function ChatInput({
   onSendMessage,
   onFocusChange,
   showSuggestions,
+  isCentered = false,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
   const [isFocused, setIsFocused] = useState(false);
@@ -62,9 +64,13 @@ export function ChatInput({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.4, duration: 0.6 }}
-      className="shrink-0 bg-[#f5f3ef]/90 backdrop-blur-md border-t border-[#d4cfbe]/30 px-4 md:px-8 py-6"
+      className={
+        isCentered
+          ? "w-full"
+          : "shrink-0 bg-[#f5f3ef]/90 backdrop-blur-md border-t border-[#d4cfbe]/30 px-4 md:px-8 py-6"
+      }
     >
-      <div className="max-w-4xl mx-auto">
+      <div className={isCentered ? "w-full" : "max-w-4xl mx-auto"}>
         {/* Suggestions */}
         {showSuggestions && (
           <motion.div

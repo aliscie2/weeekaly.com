@@ -31,7 +31,7 @@ yarn-error.log*
 # IDEs
 /.idea
 /.code
-
+mycommits.md
 
 .vscode
 

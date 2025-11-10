@@ -98,6 +98,9 @@ frontend-format:
 	npx ts-unused-exports tsconfig.json || true & \
 	wait
 
+# commit 
+# run `git diff --staged` see chnags and currnt code and make built points tree then `git add .` then `git commit -m '<built points>'
+
 
 pretty:
 	prettier --write ./src/frontend

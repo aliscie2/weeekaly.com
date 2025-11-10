@@ -1,12 +1,16 @@
 import { memo } from "react";
-import { useCountdown } from "../hooks/useCurrentTime";
+import { useCountdown, useCurrentTime } from "../hooks/useCurrentTime";
 import { Clock } from "lucide-react";
 
 interface CountdownTimerProps {
   /**
-   * The target date/time to count down to
+   * The start date/time of the event
    */
-  targetDate: Date;
+  startDate: Date;
+  /**
+   * The end date/time of the event
+   */
+  endDate: Date;
   /**
    * Optional className for styling
    */
@@ -14,17 +18,26 @@ interface CountdownTimerProps {
 }
 
 /**
- * Displays a countdown timer to an upcoming event.
- * Shows "Already passed" if the event is in the past.
+ * Displays a countdown timer for an event.
+ * - Shows "Already passed" if both start and end times are in the past
+ * - Shows "Ends in X" if event has started but not ended
+ * - Shows "Starts in X" if event hasn't started yet
  */
 export const CountdownTimer = memo(function CountdownTimer({
-  targetDate,
+  startDate,
+  endDate,
   className = "",
 }: CountdownTimerProps) {
-  const countdown = useCountdown(targetDate, 1000); // Update every second
+  const currentTime = useCurrentTime(1000);
+  const startCountdown = useCountdown(startDate, 1000);
+  const endCountdown = useCountdown(endDate, 1000);
 
-  // If countdown is null, the event has passed
-  if (!countdown) {
+  const now = currentTime.getTime();
+  const start = startDate.getTime();
+  const end = endDate.getTime();
+
+  // If both start and end times are older than current time, event has passed
+  if (now > end) {
     return (
       <div
         className={`flex items-center gap-1.5 text-xs text-red-600 font-medium ${className}`}
@@ -35,24 +48,28 @@ export const CountdownTimer = memo(function CountdownTimer({
     );
   }
 
-  const { days, hours, minutes, seconds } = countdown;
+  // If start time is older than current time but end time is later, event is ongoing
+  if (now >= start && now <= end) {
+    if (!endCountdown) return null;
 
-  // Format the countdown display based on time remaining
-  let displayText = "";
-  
-  if (days > 0) {
-    // Show days and hours if more than 1 day away
-    displayText = `${days}d ${hours}h`;
-  } else if (hours > 0) {
-    // Show hours and minutes if less than 1 day
-    displayText = `${hours}h ${minutes}m`;
-  } else if (minutes > 0) {
-    // Show minutes and seconds if less than 1 hour
-    displayText = `${minutes}m ${seconds}s`;
-  } else {
-    // Show only seconds if less than 1 minute
-    displayText = `${seconds}s`;
+    const { minutes, seconds } = endCountdown;
+    const displayText = `${minutes}m ${seconds}s`;
+
+    return (
+      <div
+        className={`flex items-center gap-1.5 text-xs text-orange-600 font-medium ${className}`}
+      >
+        <Clock className="h-3.5 w-3.5" />
+        <span>Ends in {displayText}</span>
+      </div>
+    );
   }
+
+  // If start time is later than current time, event hasn't started
+  if (!startCountdown) return null;
+
+  const { minutes, seconds } = startCountdown;
+  const displayText = `${minutes}m ${seconds}s`;
 
   return (
     <div

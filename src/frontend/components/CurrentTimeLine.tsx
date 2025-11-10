@@ -67,12 +67,12 @@ export const CurrentTimeLine = memo(function CurrentTimeLine({
     >
       {/* Red line */}
       <div className="w-full h-[2px] bg-red-500 shadow-lg" />
-      
+
       {/* Time label with red background */}
       <div className="absolute left-2 -top-3 bg-red-500 text-white text-xs font-medium px-2 py-0.5 rounded shadow-lg whitespace-nowrap">
         {timeString}
       </div>
-      
+
       {/* Optional: Red dot at the start of the line */}
       <div className="absolute -left-1 -top-1 w-2 h-2 bg-red-500 rounded-full shadow-lg" />
     </div>
