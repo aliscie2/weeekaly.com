@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { Button } from "./ui/button";
+import { Button } from "../components/ui/button";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
 
 interface DeleteConfirmationPageProps {

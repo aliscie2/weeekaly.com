@@ -1,11 +1,17 @@
-import { useState } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { motion } from "motion/react";
-import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { Button } from "./ui/button";
-import { Card } from "./ui/card";
-import { ScrollArea } from "./ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "./ui/tabs";
-import { Badge } from "./ui/badge";
+import { useNavigate } from "react-router-dom";
+import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { ScrollArea } from "../components/ui/scroll-area";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "../components/ui/tabs";
+import { Badge } from "../components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,7 +21,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "./ui/alert-dialog";
+} from "../components/ui/alert-dialog";
 import {
   Clock,
   Video,
@@ -34,7 +40,8 @@ import {
   isPast,
   isFuture,
 } from "date-fns";
-import { EventFormModal } from "./EventFormModal";
+import { EventFormModal } from "../components/EventFormModal";
+import { CountdownTimer } from "../components/CountdownTimer";
 import { useEventActions } from "../hooks/useEventActions";
 import { useCalendarEvents } from "../hooks/useBackend";
 
@@ -45,7 +52,7 @@ interface EventAttendee {
   avatar: string;
 }
 
-export interface Event {
+interface Event {
   id: string;
   title: string;
   startTime: Date;
@@ -59,52 +66,66 @@ export interface Event {
 }
 
 interface EventsPageProps {
-  onBack: () => void;
   currentUserId: string;
 }
 
-export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
+export function EventsPage({ currentUserId }: EventsPageProps) {
+  const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState<
     "today" | "week" | "month" | "past"
   >("today");
+
+  // Track if this is the first mount to control animations
+  const isFirstMount = useRef(true);
+  useEffect(() => {
+    isFirstMount.current = false;
+  }, []);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     eventId: string;
     eventTitle: string;
   } | null>(null);
 
   // Fetch events from Google Calendar
-  const { data: googleEvents = [], isLoading: isLoadingEvents } =
-    useCalendarEvents(true);
+  const {
+    data: googleEvents = [],
+    isLoading: isLoadingEvents,
+    error: eventsError,
+  } = useCalendarEvents(true);
 
   // Use event actions hook
   const eventActions = useEventActions();
 
-  // Convert Google Calendar events to our Event format
-  const events: Event[] = googleEvents.map((gEvent) => ({
-    id: gEvent.id,
-    title: gEvent.summary || "Untitled Event",
-    startTime: new Date(gEvent.start?.dateTime || gEvent.start?.date || ""),
-    endTime: new Date(gEvent.end?.dateTime || gEvent.end?.date || ""),
-    attendees: (gEvent.attendees || []).map((a: any) => ({
-      id: a.email,
-      name: a.displayName || a.email,
-      email: a.email,
-      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(a.displayName || a.email)}&background=8b8475&color=fff`,
-    })),
-    meetLink: gEvent.hangoutLink,
-    aiSummary: gEvent.description || "No description available",
-    thumbnail:
-      "https://images.unsplash.com/photo-1431540015161-0bf868a2d407?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxidXNpbmVzcyUyMG1lZXRpbmclMjByb29tfGVufDF8fHx8MTc2MjA1ODY0MHww&ixlib=rb-4.1.0&q=80&w=1080",
-    location: gEvent.location,
-    createdBy: gEvent.creator?.self ? currentUserId : "other",
-  }));
+  // Convert Google Calendar events to our Event format - memoized to prevent recalculation
+  const events: Event[] = useMemo(() => {
+    return googleEvents.map((gEvent) => ({
+      id: gEvent.id,
+      title: gEvent.summary || "Untitled Event",
+      startTime: new Date(gEvent.start?.dateTime || gEvent.start?.date || ""),
+      endTime: new Date(gEvent.end?.dateTime || gEvent.end?.date || ""),
+      attendees: (gEvent.attendees || []).map(
+        (a: { email: string; displayName?: string }) => ({
+          id: a.email,
+          name: a.displayName || a.email,
+          email: a.email,
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(a.displayName || a.email)}&background=8b8475&color=fff`,
+        }),
+      ),
+      meetLink: gEvent.hangoutLink,
+      aiSummary: gEvent.description || "No description available",
+      thumbnail:
+        "https://images.unsplash.com/photo-1431540015161-0bf868a2d407?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxidXNpbmVzcyUyMG1lZXRpbmclMjByb29tfGVufDF8fHx8MTc2MjA1ODY0MHww&ixlib=rb-4.1.0&q=80&w=1080",
+      location: gEvent.location,
+      createdBy: gEvent.creator?.self ? currentUserId : "other",
+    }));
+  }, [googleEvents, currentUserId]);
 
-  const filterEvents = (filter: "today" | "week" | "month" | "past") => {
+  // Memoize filtered events to prevent recalculation on every render
+  const filteredEvents = useMemo(() => {
     return events
       .filter((event) => {
         const eventDate = event.startTime;
 
-        switch (filter) {
+        switch (activeFilter) {
           case "today":
             // Show only events happening today
             return isToday(eventDate);
@@ -123,22 +144,20 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
       })
       .sort((a, b) => {
         // For past events, show most recent first
-        if (filter === "past") {
+        if (activeFilter === "past") {
           return b.startTime.getTime() - a.startTime.getTime();
         }
         // For future events, show soonest first
         return a.startTime.getTime() - b.startTime.getTime();
       });
-  };
-
-  const filteredEvents = filterEvents(activeFilter);
+  }, [events, activeFilter]);
 
   const formatTime = (date: Date) => format(date, "h:mm a");
   const formatDate = (date: Date) => format(date, "MMM d, yyyy");
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={isFirstMount.current ? { opacity: 0, y: 20 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6 }}
       className="flex-1 overflow-hidden flex flex-col py-4 md:py-8 px-4 md:px-8"
@@ -146,14 +165,15 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
       <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
         {/* Back Button */}
         <motion.div
-          initial={{ opacity: 0, x: -20 }}
+          initial={isFirstMount.current ? { opacity: 0, x: -20 } : false}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6 }}
           className="mb-4"
         >
           <Button
+            type="button"
             variant="ghost"
-            onClick={onBack}
+            onClick={() => navigate("/")}
             className="text-[#8b8475] hover:text-[#8b8475] hover:bg-[#e8e4d9]/60 -ml-2 group"
           >
             <ArrowLeft className="h-4 w-4 mr-2 transition-transform group-hover:-translate-x-1" />
@@ -163,7 +183,7 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
 
         {/* Header */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
+          initial={isFirstMount.current ? { opacity: 0, scale: 0.95 } : false}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.2, duration: 0.6 }}
           className="mb-4 md:mb-6"
@@ -173,6 +193,7 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
           </h1>
           <div className="flex flex-wrap gap-2 mt-3">
             <Button
+              type="button"
               onClick={() => eventActions.openCreateForm()}
               disabled={eventActions.isLoading}
               className="bg-[#8b8475] hover:bg-[#6b6558] text-[#f5f3ef] h-9 px-4 text-sm"
@@ -186,7 +207,9 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
         {/* Filters */}
         <Tabs
           value={activeFilter}
-          onValueChange={(v) => setActiveFilter(v as any)}
+          onValueChange={(v) =>
+            setActiveFilter(v as "today" | "week" | "month" | "past")
+          }
           className="flex flex-col flex-1 overflow-hidden"
         >
           <TabsList className="bg-[#e8e4d9]/60 border border-[#d4cfbe]/40 mb-4 w-full grid grid-cols-4 h-auto">
@@ -230,19 +253,56 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
                   >
                     Loading events...
                   </motion.div>
+                ) : eventsError ? (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-center py-12"
+                  >
+                    <div className="text-red-600 mb-2">
+                      Error loading events
+                    </div>
+                    <div className="text-xs text-[#a8a195]">
+                      {eventsError instanceof Error
+                        ? eventsError.message
+                        : "Unknown error occurred"}
+                    </div>
+                  </motion.div>
+                ) : googleEvents.length === 0 ? (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-center py-12"
+                  >
+                    <div className="text-[#a8a195] mb-2">
+                      No events in your calendar
+                    </div>
+                    <div className="text-xs text-[#a8a195]">
+                      Debug: Total events = {googleEvents.length}, Filtered ={" "}
+                      {filteredEvents.length}
+                    </div>
+                  </motion.div>
                 ) : filteredEvents.length === 0 ? (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="text-center py-12 text-[#a8a195]"
+                    className="text-center py-12"
                   >
-                    No events found for this period
+                    <div className="text-[#a8a195] mb-2">
+                      No events found for "{activeFilter}"
+                    </div>
+                    <div className="text-xs text-[#a8a195]">
+                      Debug: Total events = {googleEvents.length}, Showing 0 for
+                      this filter
+                    </div>
                   </motion.div>
                 ) : (
                   filteredEvents.map((event, index) => (
                     <motion.div
                       key={event.id}
-                      initial={{ opacity: 0, x: -20 }}
+                      initial={
+                        isFirstMount.current ? { opacity: 0, x: -20 } : false
+                      }
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: index * 0.05, duration: 0.4 }}
                     >
@@ -283,6 +343,13 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
                               </span>
                             </div>
 
+                            {/* Countdown Timer - Only show for today's events */}
+                            {activeFilter === "today" && isToday(event.startTime) && (
+                              <div className="mb-2">
+                                <CountdownTimer targetDate={event.startTime} />
+                              </div>
+                            )}
+
                             {/* AI Summary */}
                             <div className="flex items-start gap-1 mb-3">
                               <Sparkles className="h-3 w-3 text-[#8b8475] shrink-0 mt-0.5" />
@@ -322,6 +389,7 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
                                 {/* Google Meet Link */}
                                 {event.meetLink && (
                                   <Button
+                                    type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       window.open(event.meetLink, "_blank");
@@ -338,6 +406,7 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
                                 {/* Edit Button (only for own events) */}
                                 {event.createdBy === currentUserId && (
                                   <Button
+                                    type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       eventActions.openEditForm(event.id, {
@@ -366,6 +435,7 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
                                 {/* Delete or Cancel Button */}
                                 {event.createdBy === currentUserId ? (
                                   <Button
+                                    type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setDeleteConfirm({
@@ -383,6 +453,7 @@ export function EventsPage({ onBack, currentUserId }: EventsPageProps) {
                                   </Button>
                                 ) : (
                                   <Button
+                                    type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       eventActions.handleCancelAttendance(

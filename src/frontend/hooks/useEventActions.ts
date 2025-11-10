@@ -68,10 +68,10 @@ export function useEventActions() {
             toast.success("Event updated successfully!");
             closeForm();
           },
-          onError: (error: any) => {
-            toast.error(
-              `Failed to update event: ${error.message || "Unknown error"}`,
-            );
+          onError: (error: Error) => {
+            console.error("[useEventActions] ❌ Update failed:", error);
+            const errorMessage = error.message || "Unknown error";
+            toast.error(`Failed to update event: ${errorMessage}`);
           },
         },
       );
@@ -82,10 +82,10 @@ export function useEventActions() {
           toast.success("Event created successfully!");
           closeForm();
         },
-        onError: (error: any) => {
-          toast.error(
-            `Failed to create event: ${error.message || "Unknown error"}`,
-          );
+        onError: (error: Error) => {
+          console.error("[useEventActions] ❌ Create failed:", error);
+          const errorMessage = error.message || "Unknown error";
+          toast.error(`Failed to create event: ${errorMessage}`);
         },
       });
     }
@@ -112,10 +112,10 @@ export function useEventActions() {
             : undefined,
         });
       },
-      onError: (error: any) => {
-        toast.error(
-          `Failed to delete event: ${error.message || "Unknown error"}`,
-        );
+      onError: (error: Error) => {
+        console.error("[useEventActions] ❌ Delete failed:", error);
+        const errorMessage = error.message || "Unknown error";
+        toast.error(`Failed to delete event: ${errorMessage}`);
       },
     });
   };
@@ -135,8 +135,10 @@ export function useEventActions() {
         onSuccess: () => {
           toast.success(`You cancelled "${eventTitle}"`);
         },
-        onError: (error: any) => {
-          toast.error(`Failed to cancel: ${error.message || "Unknown error"}`);
+        onError: (error: Error) => {
+          console.error("[useEventActions] ❌ Cancel failed:", error);
+          const errorMessage = error.message || "Unknown error";
+          toast.error(`Failed to cancel: ${errorMessage}`);
         },
       },
     );

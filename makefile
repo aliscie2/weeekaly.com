@@ -87,9 +87,17 @@ topup_backend:
 
 # Code Quality
 frontend-format:
-	npm run format
-	npx tsc --noUnusedLocals --noUnusedParameters --noEmit --skipLibCheck
-	npx ts-unused-exports tsconfig.json || true
+#  make sure to read COMMON_MISTAKES.md before u start
+# 	remove unused function, and delete unused files
+#  do not care about anything outse src/frontend
+#  fix types and avoid using any as much as possable and use meaningfull types
+#  re-run this after you fnish if there is no more warnings and error do no rerun again
+# batching chnages together, do making changes one at a time
+	npm run format & \
+	npx tsc --noUnusedLocals --noUnusedParameters --noEmit --skipLibCheck & \
+	npx ts-unused-exports tsconfig.json || true & \
+	wait
+
 
 pretty:
 	prettier --write ./src/frontend

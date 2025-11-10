@@ -1,27 +1,42 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Button } from "./ui/button";
-import { Label } from "./ui/label";
-import { Slider } from "./ui/slider";
+import { useNavigate } from "react-router-dom";
+import { Button } from "../components/ui/button";
+import { Label } from "../components/ui/label";
+import { Slider } from "../components/ui/slider";
 import { ArrowLeft, ZoomIn, ZoomOut } from "lucide-react";
 import Cropper from "react-easy-crop";
 
-interface AvatarEditPageProps {
-  imageSrc: string;
-  onSave: (croppedAreaPixels: any) => void;
-  onBack: () => void;
+interface CroppedAreaPixels {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
-export function AvatarEditPage({
-  imageSrc,
-  onSave,
-  onBack,
-}: AvatarEditPageProps) {
+interface CroppedArea {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface AvatarEditPageProps {
+  imageSrc: string;
+  onSave: (croppedAreaPixels: CroppedAreaPixels) => void;
+}
+
+export function AvatarEditPage({ imageSrc, onSave }: AvatarEditPageProps) {
+  const navigate = useNavigate();
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
+  const [croppedAreaPixels, setCroppedAreaPixels] =
+    useState<CroppedAreaPixels | null>(null);
 
-  const onCropComplete = (_croppedArea: any, croppedAreaPixels: any) => {
+  const onCropComplete = (
+    _croppedArea: CroppedArea,
+    croppedAreaPixels: CroppedAreaPixels,
+  ) => {
     setCroppedAreaPixels(croppedAreaPixels);
   };
 
@@ -48,7 +63,7 @@ export function AvatarEditPage({
         >
           <Button
             variant="ghost"
-            onClick={onBack}
+            onClick={() => navigate("/profile")}
             className="text-[#8b8475] hover:text-[#8b8475] hover:bg-[#e8e4d9]/60 -ml-2 group h-8 md:h-10 px-2 md:px-4 text-xs md:text-sm"
           >
             <ArrowLeft className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2 transition-transform group-hover:-translate-x-1" />
@@ -102,7 +117,7 @@ export function AvatarEditPage({
           {/* Action Buttons */}
           <div className="flex justify-end gap-2 md:gap-3">
             <Button
-              onClick={onBack}
+              onClick={() => navigate("/profile")}
               variant="outline"
               className="bg-[#e8e4d9]/60 hover:bg-[#d4cfbe] text-[#8b8475] border-[#d4cfbe]/40 h-8 md:h-10 px-3 md:px-4 text-xs md:text-sm"
             >

@@ -33,7 +33,13 @@ interface GoogleCalendarEvent {
   organizer?: GoogleCalendarPerson;
   hangoutLink?: string;
   status?: string;
-  [key: string]: any; // Allow additional properties from Google Calendar API
+  htmlLink?: string;
+  conferenceData?: {
+    entryPoints?: Array<{
+      entryPointType?: string;
+      uri?: string;
+    }>;
+  };
 }
 
 /**
@@ -52,66 +58,88 @@ export function useHelloWorld() {
 }
 
 /**
- * Hook to fetch calendar events with optimized auto-refresh
- * Polls every 5 minutes (reduced from 30 seconds for better performance)
+ * Hook to fetch calendar events directly from Google Calendar API
+ * Optimized for React 19 with better caching and reduced polling
  *
  * @param enabled - Whether to enable polling (default: true)
  */
 export function useCalendarEvents(enabled: boolean = true) {
-  const queryClient = useQueryClient();
-
   return useQuery({
     queryKey: ["calendar-events"],
     queryFn: async (): Promise<GoogleCalendarEvent[]> => {
-      // Dynamically import to avoid circular dependencies
-      const { fetchGoogleCalendarEvents } = await import(
-        "../utils/googleCalendar"
-      );
+      try {
+        // Check if user is authenticated
+        const isAuth = await backendActor.is_authenticated();
 
-      const events = await fetchGoogleCalendarEvents();
-
-      // Check if user account changed (detect account switch)
-      if (events.length > 0) {
-        const firstEvent = events[0];
-        const currentUserEmail =
-          firstEvent.creator?.email || (firstEvent as any).organizer?.email;
-        const storedUserEmail = localStorage.getItem("calendar_user_email");
-
-        if (
-          storedUserEmail &&
-          currentUserEmail &&
-          storedUserEmail !== currentUserEmail
-        ) {
-          // Clear all React Query cache
-          queryClient.clear();
-          queryClient.removeQueries();
-
-          // Update stored email
-          localStorage.setItem("calendar_user_email", currentUserEmail);
-
-          // Return empty array to force refetch with new account
+        if (!isAuth) {
           return [];
-        } else if (currentUserEmail && !storedUserEmail) {
-          // First time - store the email
-          localStorage.setItem("calendar_user_email", currentUserEmail);
         }
-      }
 
-      return events;
+        // Get the access token from localStorage (stored during OAuth flow)
+        const accessToken = localStorage.getItem("ic-access-token");
+
+        if (!accessToken) {
+          return [];
+        }
+
+        // Fetch events from Google Calendar API
+        // Get events from the past 30 days to 90 days in the future
+        const timeMin = new Date();
+        timeMin.setDate(timeMin.getDate() - 30);
+        const timeMax = new Date();
+        timeMax.setDate(timeMax.getDate() + 90);
+
+        const url = new URL(
+          "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        );
+        url.searchParams.append("timeMin", timeMin.toISOString());
+        url.searchParams.append("timeMax", timeMax.toISOString());
+        url.searchParams.append("singleEvents", "true");
+        url.searchParams.append("orderBy", "startTime");
+        url.searchParams.append("maxResults", "250");
+
+        const response = await fetch(url.toString(), {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          // If token is invalid, clear it
+          if (response.status === 401) {
+            localStorage.removeItem("ic-access-token");
+          }
+
+          throw new Error(`Google Calendar API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const events = data.items || [];
+
+        return events;
+      } catch (error) {
+        console.error(
+          "[useCalendarEvents] ❌ Error:",
+          error instanceof Error ? error.message : String(error),
+        );
+        // Return empty array on error instead of throwing
+        return [];
+      }
     },
-    enabled, // Only run if enabled
-    refetchInterval: 5 * 60 * 1000, // Poll every 5 minutes (96% reduction in API calls)
-    refetchIntervalInBackground: false, // Stop polling when tab is inactive (saves battery)
-    staleTime: 2 * 60 * 1000, // Cache for 2 minutes - data is "fresh" for 2 min
-    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes before garbage collection
-    retry: 3, // Retry failed requests
-    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
+    enabled: enabled,
+    refetchInterval: false, // Disable auto-polling - use manual refresh instead
+    staleTime: 10 * 60 * 1000, // Consider data fresh for 10 minutes
+    gcTime: 15 * 60 * 1000, // Keep in cache for 15 minutes
+    retry: 1,
+    refetchOnWindowFocus: false, // Prevent refetch on window focus
+    refetchOnMount: false, // Prevent refetch on component mount if data exists
   });
 }
 
 /**
  * Hook to create a new calendar event
- * Automatically invalidates calendar events query on success
+ * Optimized with optimistic updates for instant UI feedback
  */
 export function useCreateEvent() {
   const queryClient = useQueryClient();
@@ -126,32 +154,142 @@ export function useCreateEvent() {
       location?: string;
       conferenceData?: boolean;
     }) => {
-      // Use frontend direct API call for all events (including Google Meet)
-      const { createGoogleCalendarEvent } = await import(
-        "../utils/googleCalendar"
+      // Check if user is authenticated
+      const isAuth = await backendActor.is_authenticated();
+      if (!isAuth) {
+        throw new Error("User not authenticated");
+      }
+
+      // Get access token
+      const accessToken = localStorage.getItem("ic-access-token");
+      if (!accessToken) {
+        throw new Error("No access token found. Please log in again.");
+      }
+
+      // Get user's timezone
+      const timeZone =
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+      // Build event object
+      const event: any = {
+        summary: input.summary,
+        description: input.description || "",
+        start: {
+          dateTime: input.start.toISOString(),
+          timeZone: timeZone,
+        },
+        end: {
+          dateTime: input.end.toISOString(),
+          timeZone: timeZone,
+        },
+        location: input.location || "",
+        attendees: input.attendees || [],
+      };
+
+      // Add Google Meet conference if requested
+      if (input.conferenceData) {
+        event.conferenceData = {
+          createRequest: {
+            requestId: `meet-${Date.now()}`,
+            conferenceSolutionKey: { type: "hangoutsMeet" },
+          },
+        };
+      }
+
+      // Create event via Google Calendar API
+      const response = await fetch(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(event),
+        },
       );
-      const result = await createGoogleCalendarEvent(input);
-      return { id: result.id };
+
+      if (!response.ok) {
+        // If token is invalid, clear it
+        if (response.status === 401) {
+          localStorage.removeItem("ic-access-token");
+          throw new Error("Session expired. Please log in again.");
+        }
+
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to create event: ${response.status} ${errorText}`,
+        );
+      }
+
+      const createdEvent = await response.json();
+      return createdEvent;
     },
-    onSuccess: () => {
-      // Invalidate and refetch calendar events
-      queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
+    onMutate: async (newEvent) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ["calendar-events"] });
+
+      // Snapshot previous value
+      const previousEvents = queryClient.getQueryData<GoogleCalendarEvent[]>([
+        "calendar-events",
+      ]);
+
+      // Add temp event to cache immediately
+      const tempId = `temp-${Date.now()}`;
+      queryClient.setQueryData<GoogleCalendarEvent[]>(
+        ["calendar-events"],
+        (old = []) => {
+          const tempEvent: GoogleCalendarEvent = {
+            id: tempId,
+            summary: newEvent.summary,
+            description: newEvent.description,
+            start: {
+              dateTime: newEvent.start.toISOString(),
+            },
+            end: {
+              dateTime: newEvent.end.toISOString(),
+            },
+            location: newEvent.location,
+            attendees: newEvent.attendees,
+          };
+          return [...old, tempEvent];
+        },
+      );
+
+      return { previousEvents, tempId };
+    },
+    onError: (_err, _newEvent, context) => {
+      // Rollback on error
+      if (context?.previousEvents) {
+        queryClient.setQueryData(["calendar-events"], context.previousEvents);
+      }
+    },
+    onSuccess: (createdEvent, _newEvent, context) => {
+      // Replace temp event with real event from server
+      queryClient.setQueryData<GoogleCalendarEvent[]>(
+        ["calendar-events"],
+        (old = []) => {
+          return old.map((event) =>
+            event.id === context?.tempId ? createdEvent : event,
+          );
+        },
+      );
+    },
+    onSettled: () => {
+      // Mutation complete
     },
   });
 }
 
 /**
  * Hook to update an existing calendar event
- * Automatically invalidates calendar events query on success
+ * Optimized with optimistic updates for instant UI feedback
  */
 export function useUpdateEvent() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({
-      eventId,
-      updates,
-    }: {
+    mutationFn: async (params: {
       eventId: string;
       updates: {
         summary?: string;
@@ -164,106 +302,197 @@ export function useUpdateEvent() {
         conferenceData?: boolean;
       };
     }) => {
-      // Use frontend direct API call (works without backend token)
-      const { updateGoogleCalendarEvent } = await import(
-        "../utils/googleCalendar"
+      // Check if user is authenticated
+      const isAuth = await backendActor.is_authenticated();
+      if (!isAuth) {
+        throw new Error("User not authenticated");
+      }
+
+      // Get access token
+      const accessToken = localStorage.getItem("ic-access-token");
+      if (!accessToken) {
+        throw new Error("No access token found. Please log in again.");
+      }
+
+      // Get user's timezone
+      const timeZone =
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+      // Build update object (only include fields that are being updated)
+      const updates: any = {};
+
+      if (params.updates.summary !== undefined) {
+        updates.summary = params.updates.summary;
+      }
+      if (params.updates.description !== undefined) {
+        updates.description = params.updates.description;
+      }
+      if (params.updates.start !== undefined) {
+        updates.start = {
+          dateTime: params.updates.start.toISOString(),
+          timeZone: timeZone,
+        };
+      }
+      if (params.updates.end !== undefined) {
+        updates.end = {
+          dateTime: params.updates.end.toISOString(),
+          timeZone: timeZone,
+        };
+      }
+      if (params.updates.location !== undefined) {
+        updates.location = params.updates.location;
+      }
+      if (params.updates.attendees !== undefined) {
+        updates.attendees = params.updates.attendees;
+      }
+      if (params.updates.status !== undefined) {
+        updates.status = params.updates.status;
+      }
+
+      // Update event via Google Calendar API
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${params.eventId}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(updates),
+        },
       );
-      const result = await updateGoogleCalendarEvent(eventId, updates);
-      // Return the full event data from Google Calendar API
-      return result;
+
+      if (!response.ok) {
+        // If token is invalid, clear it
+        if (response.status === 401) {
+          localStorage.removeItem("ic-access-token");
+          throw new Error("Session expired. Please log in again.");
+        }
+
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to update event: ${response.status} ${errorText}`,
+        );
+      }
+
+      const updatedEvent = await response.json();
+      return updatedEvent;
     },
-    onMutate: async ({ eventId, updates }) => {
+    onMutate: async (params) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: ["calendar-events"] });
 
       // Snapshot previous value
-      const previousEvents = queryClient.getQueryData(["calendar-events"]);
+      const previousEvents = queryClient.getQueryData<GoogleCalendarEvent[]>([
+        "calendar-events",
+      ]);
 
-      // Optimistically update
-      queryClient.setQueryData(
+      // Update cache directly with the changes
+      queryClient.setQueryData<GoogleCalendarEvent[]>(
         ["calendar-events"],
-        (old: GoogleCalendarEvent[] | undefined) => {
-          if (!old) return old;
-          return old.map((event) =>
-            event.id === eventId ? { ...event, ...updates } : event,
-          );
-        },
-      );
-
-      return { previousEvents };
-    },
-    onError: (_error, _variables, context) => {
-      // Rollback on error
-      if (context?.previousEvents) {
-        queryClient.setQueryData(["calendar-events"], context.previousEvents);
-      }
-    },
-    onSuccess: (updatedEvent, variables) => {
-      // Immediately update the cache with the actual data from Google Calendar API
-      // This ensures the Meet link appears right away if Google returned it
-      queryClient.setQueryData(
-        ["calendar-events"],
-        (old: GoogleCalendarEvent[] | undefined) => {
-          if (!old) return old;
+        (old = []) => {
           return old.map((event) => {
-            if (event.id === variables.eventId) {
-              // Use the actual event data returned from Google Calendar
-              return updatedEvent;
+            if (event.id === params.eventId) {
+              return {
+                ...event,
+                ...(params.updates.summary !== undefined && {
+                  summary: params.updates.summary,
+                }),
+                ...(params.updates.description !== undefined && {
+                  description: params.updates.description,
+                }),
+                ...(params.updates.start !== undefined && {
+                  start: { dateTime: params.updates.start.toISOString() },
+                }),
+                ...(params.updates.end !== undefined && {
+                  end: { dateTime: params.updates.end.toISOString() },
+                }),
+                ...(params.updates.location !== undefined && {
+                  location: params.updates.location,
+                }),
+                ...(params.updates.attendees !== undefined && {
+                  attendees: params.updates.attendees,
+                }),
+                ...(params.updates.status !== undefined && {
+                  status: params.updates.status,
+                }),
+              };
             }
             return event;
           });
         },
       );
+
+      return { previousEvents };
+    },
+    onError: (_err, _params, context) => {
+      // Rollback on error
+      if (context?.previousEvents) {
+        queryClient.setQueryData(["calendar-events"], context.previousEvents);
+      }
+    },
+    onSuccess: () => {
+      // Don't invalidate - we already updated the cache in onMutate
     },
     onSettled: () => {
-      // Refetch to ensure we have the latest data
-      queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
+      // Mutation complete
     },
   });
 }
 
 /**
  * Hook to delete a calendar event
- * Automatically invalidates calendar events query on success
+ * Optimized with optimistic updates for instant UI feedback
  */
 export function useDeleteEvent() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (eventId: string) => {
-      // Use frontend direct API call (works without backend token)
-      const { deleteGoogleCalendarEvent } = await import(
-        "../utils/googleCalendar"
-      );
-      await deleteGoogleCalendarEvent(eventId);
-      return eventId;
-    },
-    onMutate: async (eventId) => {
-      // Cancel outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ["calendar-events"] });
+      // Check if user is authenticated
+      const isAuth = await backendActor.is_authenticated();
+      if (!isAuth) {
+        throw new Error("User not authenticated");
+      }
 
-      // Snapshot previous value
-      const previousEvents = queryClient.getQueryData(["calendar-events"]);
+      // Get access token
+      const accessToken = localStorage.getItem("ic-access-token");
+      if (!accessToken) {
+        throw new Error("No access token found. Please log in again.");
+      }
 
-      // Optimistically remove event
-      queryClient.setQueryData(
-        ["calendar-events"],
-        (old: GoogleCalendarEvent[] | undefined) => {
-          if (!old) return old;
-          return old.filter((event) => event.id !== eventId);
+      // Delete event via Google Calendar API
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
         },
       );
 
-      return { previousEvents };
-    },
-    onError: (_error, _variables, context) => {
-      // Rollback on error
-      if (context?.previousEvents) {
-        queryClient.setQueryData(["calendar-events"], context.previousEvents);
+      if (!response.ok) {
+        // If token is invalid, clear it
+        if (response.status === 401) {
+          localStorage.removeItem("ic-access-token");
+          throw new Error("Session expired. Please log in again.");
+        }
+
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to delete event: ${response.status} ${errorText}`,
+        );
       }
+
+      return { success: true };
     },
-    onSettled: () => {
-      // Always refetch after error or success
+    // Removed optimistic updates - they cause double renders
+    onError: () => {
+      // Error handled by caller
+    },
+    onSuccess: () => {
+      // Refetch to ensure consistency
       queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
     },
   });

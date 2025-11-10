@@ -1,6 +1,7 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Button } from "./ui/button";
+import { useNavigate } from "react-router-dom";
+import { Button } from "../components/ui/button";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -21,8 +22,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "./ui/alert-dialog";
-import { EventFormModal } from "./EventFormModal";
+} from "../components/ui/alert-dialog";
+import { EventFormModal } from "../components/EventFormModal";
+import { CurrentTimeLine } from "../components/CurrentTimeLine";
 import { useEventActions } from "../hooks/useEventActions";
 import { useCalendarEvents } from "../hooks/useBackend";
 import {
@@ -57,7 +59,6 @@ interface AvailabilityEvent {
 interface AvailabilityPageProps {
   availabilityName: string;
   currentStartDate: Date;
-  onBack: () => void;
   onPreviousWeek: () => void;
   onNextWeek: () => void;
   onToday: () => void;
@@ -167,18 +168,34 @@ const copyToClipboard = (text: string) => {
   }
 };
 
-export function AvailabilityPage({
+export const AvailabilityPage = memo(function AvailabilityPage({
   availabilityName,
   currentStartDate,
-  onBack,
   onPreviousWeek,
   onNextWeek,
   onToday,
   isCurrentWeek,
   isMobile,
 }: AvailabilityPageProps) {
+  // 🔍 DEBUG: Track renders
+  const renderCount = useRef(0);
+  renderCount.current++;
+
+  const navigate = useNavigate();
   const daysToShow = isMobile ? 2 : 7;
-  const weekData = getDaysData(currentStartDate, daysToShow);
+
+  // Track if this is the first mount to control animations
+  const isFirstMount = useRef(true);
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+    }
+  }, []);
+
+  // Memoize weekData to prevent recalculation on every render
+  const weekData = useMemo(() => {
+    return getDaysData(currentStartDate, daysToShow);
+  }, [currentStartDate, daysToShow]);
 
   // ALL events come from Google Calendar only (no local events)
   const [focusedEventId, setFocusedEventId] = useState<string | null>(null);
@@ -191,93 +208,79 @@ export function AvailabilityPage({
     isRefetching,
   } = useCalendarEvents(true);
 
+  // Track when googleEvents changes (with stable reference check)
+  const prevEventsLengthRef = useRef(googleEvents.length);
+  useEffect(() => {
+    if (prevEventsLengthRef.current !== googleEvents.length) {
+      prevEventsLengthRef.current = googleEvents.length;
+    }
+  }, [googleEvents]);
+
   // Use event actions hook for Google Calendar integration
   const eventActions = useEventActions();
 
-  /**
-   * Convert Google Calendar events to AvailabilityEvents for display on grid
-   * Memoized to avoid recalculating on every render
-   */
-  const convertGoogleEventsToAvailabilityEvents =
-    useCallback((): AvailabilityEvent[] => {
-      const availabilityEvents: AvailabilityEvent[] = [];
+  // ALL events come from Google Calendar only - memoized for performance
+  const events = useMemo(() => {
+    const availabilityEvents: AvailabilityEvent[] = [];
 
-      googleEvents.forEach((gEvent) => {
-        const eventStart = new Date(
-          gEvent.start?.dateTime || gEvent.start?.date || "",
+    googleEvents.forEach((gEvent) => {
+      const eventStart = new Date(
+        gEvent.start?.dateTime || gEvent.start?.date || "",
+      );
+      const eventEnd = new Date(gEvent.end?.dateTime || gEvent.end?.date || "");
+
+      // Find which day in weekData this event belongs to
+      const dayIndex = weekData.findIndex((day) => {
+        const eventYear = eventStart.getFullYear();
+        const eventMonth = eventStart.getMonth();
+        const eventDate = eventStart.getDate();
+
+        const dayYear = day.date.getFullYear();
+        const dayMonth = day.date.getMonth();
+        const dayDate = day.date.getDate();
+
+        return (
+          eventYear === dayYear &&
+          eventMonth === dayMonth &&
+          eventDate === dayDate
         );
-        const eventEnd = new Date(
-          gEvent.end?.dateTime || gEvent.end?.date || "",
-        );
-
-        // Find which day in weekData this event belongs to
-        // Events come from Google Calendar already in browser timezone
-        const dayIndex = weekData.findIndex((day) => {
-          // Compare year, month, and date directly (no timezone conversion)
-          const eventYear = eventStart.getFullYear();
-          const eventMonth = eventStart.getMonth();
-          const eventDate = eventStart.getDate();
-
-          const dayYear = day.date.getFullYear();
-          const dayMonth = day.date.getMonth();
-          const dayDate = day.date.getDate();
-
-          return (
-            eventYear === dayYear &&
-            eventMonth === dayMonth &&
-            eventDate === dayDate
-          );
-        });
-
-        // Only show events that fall within the current week view
-        if (dayIndex === -1) return;
-
-        if (!weekData[dayIndex].available) return;
-
-        const day = weekData[dayIndex];
-        if (day.timeSlots.length === 0) return;
-
-        // Calculate startMinutes from the day's time slot start
-        const timeSlotStart = day.timeSlots[0].start;
-        const baseHour = parseTimeToHours(timeSlotStart);
-
-        const eventHour = eventStart.getHours() + eventStart.getMinutes() / 60;
-        const startMinutes = Math.max(
-          0,
-          Math.round((eventHour - baseHour) * 60),
-        );
-
-        // Calculate duration
-        const durationMs = eventEnd.getTime() - eventStart.getTime();
-        const durationMinutes = Math.round(durationMs / (1000 * 60));
-
-        // Only show if event is within the visible time range
-        const dayTotalMinutes = calculateDuration(day.timeSlots[0]) * 60;
-        if (startMinutes >= 0 && startMinutes < dayTotalMinutes) {
-          availabilityEvents.push({
-            id: `calendar-${gEvent.id}`,
-            dayIndex,
-            startMinutes,
-            durationMinutes: Math.min(
-              durationMinutes,
-              dayTotalMinutes - startMinutes,
-            ),
-            title: gEvent.summary || "Untitled Event",
-            color: "#3b82f6", // Blue for calendar events
-            isFromCalendar: true,
-            meetLink: gEvent.hangoutLink,
-          });
-        }
       });
 
-      return availabilityEvents;
-    }, [googleEvents, weekData]);
+      if (dayIndex === -1) return;
+      if (!weekData[dayIndex].available) return;
 
-  // ALL events come from Google Calendar only - memoized for performance
-  const events = useMemo(
-    () => convertGoogleEventsToAvailabilityEvents(),
-    [convertGoogleEventsToAvailabilityEvents],
-  );
+      const day = weekData[dayIndex];
+      if (day.timeSlots.length === 0) return;
+
+      const timeSlotStart = day.timeSlots[0].start;
+      const baseHour = parseTimeToHours(timeSlotStart);
+
+      const eventHour = eventStart.getHours() + eventStart.getMinutes() / 60;
+      const startMinutes = Math.max(0, Math.round((eventHour - baseHour) * 60));
+
+      const durationMs = eventEnd.getTime() - eventStart.getTime();
+      const durationMinutes = Math.round(durationMs / (1000 * 60));
+
+      const dayTotalMinutes = calculateDuration(day.timeSlots[0]) * 60;
+      if (startMinutes >= 0 && startMinutes < dayTotalMinutes) {
+        availabilityEvents.push({
+          id: `calendar-${gEvent.id}`,
+          dayIndex,
+          startMinutes,
+          durationMinutes: Math.min(
+            durationMinutes,
+            dayTotalMinutes - startMinutes,
+          ),
+          title: gEvent.summary || "Untitled Event",
+          color: "#3b82f6",
+          isFromCalendar: true,
+          meetLink: gEvent.hangoutLink,
+        });
+      }
+    });
+
+    return availabilityEvents;
+  }, [googleEvents, weekData]);
 
   // Drag state for creating new events
   const [isDraggingNew, setIsDraggingNew] = useState(false);
@@ -445,6 +448,8 @@ export function AvailabilityPage({
 
         const rect = container.getBoundingClientRect();
         const y = e.clientY - rect.top;
+
+        // Direct state update - React 19 batches automatically
         setDragCurrentY(y);
         return;
       }
@@ -461,6 +466,7 @@ export function AvailabilityPage({
         const deltaY = e.clientY - dragStartY;
         const deltaMinutes = pixelsToMinutes(deltaY, rect.height, totalMinutes);
 
+        // Direct state updates - React 19 batches automatically
         if (dragType === "move") {
           // Move entire event
           let newStartMinutes = originalEventData.startMinutes + deltaMinutes;
@@ -512,6 +518,7 @@ export function AvailabilityPage({
       dragDayIndex,
       originalEventData,
       dragStartY,
+      dragType,
     ],
   );
 
@@ -1227,7 +1234,7 @@ export function AvailabilityPage({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={isFirstMount.current ? { opacity: 0, y: 20 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6 }}
       className="flex-1 overflow-y-auto pt-4 md:pt-6 pb-8 md:pb-12 px-2 md:px-8"
@@ -1251,13 +1258,13 @@ export function AvailabilityPage({
         }}
       >
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={isFirstMount.current ? { opacity: 0, y: 20 } : false}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.6 }}
         >
           {/* Compact Header - All in one row */}
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
+            initial={isFirstMount.current ? { opacity: 0, y: 10 } : false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.5 }}
             className="px-2 md:px-4 mb-3"
@@ -1265,8 +1272,9 @@ export function AvailabilityPage({
             <div className="flex items-center justify-between gap-2">
               {/* Left: Back button */}
               <Button
+                type="button"
                 variant="ghost"
-                onClick={onBack}
+                onClick={() => navigate("/")}
                 size={isMobile ? "sm" : "default"}
                 className="text-[#8b8475] hover:text-[#8b8475] hover:bg-[#e8e4d9]/60 group flex-shrink-0"
               >
@@ -1286,6 +1294,7 @@ export function AvailabilityPage({
 
                 <div className="flex items-center gap-0.5 md:gap-1 flex-shrink-0">
                   <Button
+                    type="button"
                     variant="ghost"
                     size="icon"
                     onClick={onPreviousWeek}
@@ -1297,6 +1306,7 @@ export function AvailabilityPage({
                   </Button>
 
                   <Button
+                    type="button"
                     variant="ghost"
                     onClick={onToday}
                     size={isMobile ? "sm" : "default"}
@@ -1343,6 +1353,7 @@ export function AvailabilityPage({
                   </Button>
 
                   <Button
+                    type="button"
                     variant="ghost"
                     size="icon"
                     onClick={onNextWeek}
@@ -1358,6 +1369,7 @@ export function AvailabilityPage({
               {/* Right: Refresh and Share buttons */}
               <div className="flex gap-2 flex-shrink-0">
                 <Button
+                  type="button"
                   onClick={() => {
                     refetchEvents();
                     toast.success("Refreshing calendar...");
@@ -1374,6 +1386,7 @@ export function AvailabilityPage({
                   {!isMobile && "Refresh"}
                 </Button>
                 <Button
+                  type="button"
                   onClick={() => copyToClipboard(window.location.href)}
                   variant="outline"
                   size={isMobile ? "sm" : "sm"}
@@ -1490,7 +1503,9 @@ export function AvailabilityPage({
                 return (
                   <motion.div
                     key={i}
-                    initial={{ opacity: 0, y: 20 }}
+                    initial={
+                      isFirstMount.current ? { opacity: 0, y: 20 } : false
+                    }
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 + i * 0.1, duration: 0.4 }}
                     className={`flex flex-col items-center ${!isLastDay ? "border-r border-[#d4cfbe]/30" : ""}`}
@@ -1502,7 +1517,9 @@ export function AvailabilityPage({
                     </span>
                     {day.available ? (
                       <div
-                        ref={(el) => (dayRefs.current[i] = el)}
+                        ref={(el) => {
+                          dayRefs.current[i] = el;
+                        }}
                         className="w-full bg-green-500/70 relative cursor-crosshair select-none"
                         style={{
                           height: `${height}px`,
@@ -1563,6 +1580,16 @@ export function AvailabilityPage({
                               </div>
                             </div>
                           )}
+
+                        {/* Current Time Line - Red line showing current time */}
+                        {day.available && day.timeSlots.length > 0 && (
+                          <CurrentTimeLine
+                            dayDate={day.date}
+                            startHour={parseTimeToHours(day.timeSlots[0].start)}
+                            endHour={parseTimeToHours(day.timeSlots[0].end)}
+                            containerHeight={height}
+                          />
+                        )}
 
                         {/* Events (includes preview event when dragging) */}
                         <AnimatePresence>
@@ -1883,6 +1910,7 @@ export function AvailabilityPage({
                       <>
                         {/* Edit button - disabled for past events */}
                         <Button
+                          type="button"
                           variant="ghost"
                           size="icon"
                           onClick={handleEditEvent}
@@ -1897,6 +1925,7 @@ export function AvailabilityPage({
 
                         {/* Delete button */}
                         <Button
+                          type="button"
                           variant="ghost"
                           size="icon"
                           onClick={handleDeleteEvent}
@@ -1909,6 +1938,7 @@ export function AvailabilityPage({
                         {/* Google Meet button */}
                         {focusedEvent.meetLink && (
                           <Button
+                            type="button"
                             variant="ghost"
                             size="icon"
                             onClick={() =>
@@ -1925,6 +1955,7 @@ export function AvailabilityPage({
 
                     {/* Close button (always shown) */}
                     <Button
+                      type="button"
                       variant="ghost"
                       size="icon"
                       onClick={() => setFocusedEventId(null)}
@@ -1980,4 +2011,4 @@ export function AvailabilityPage({
       </div>
     </motion.div>
   );
-}
+});

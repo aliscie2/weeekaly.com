@@ -31,7 +31,6 @@ import { AUTH_CONSTANTS, AUTH_ERRORS } from "../utils/authConstants";
  *
  * // Check if authenticated
  * if (isAuthenticated) {
- *   console.log('User is logged in');
  * }
  * ```
  */
@@ -44,10 +43,6 @@ export function useOAuthIdentity() {
   // Restore identity and load providers on mount
   useEffect(() => {
     const init = async () => {
-      console.log(
-        "🔄 [useOAuthIdentity] Initializing - attempting to restore identity from storage",
-      );
-
       const sessionKey = restoreSessionKey();
       if (sessionKey) {
         setIdentity(sessionKey);
@@ -101,14 +96,10 @@ export function useOAuthIdentity() {
 
       if (result) {
         const { identity, sessionKey } = result;
-        console.log(
-          "✅ [useOAuthIdentity] Login successful - setting identity",
-        );
         setIdentity(identity);
         storeSessionKey(sessionKey);
         return true;
       }
-      console.log("❌ [useOAuthIdentity] Login failed - no result returned");
       return false;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Login failed";
@@ -121,7 +112,6 @@ export function useOAuthIdentity() {
   };
 
   const logout = () => {
-    console.log("🚪 [useOAuthIdentity] Logging out - clearing identity");
     setIdentity(null);
     clearAllUserData();
   };

@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Button } from "./ui/button";
+import { useNavigate } from "react-router-dom";
+import { Button } from "../components/ui/button";
 import { ArrowLeft, Users, Clock, MapPin, Check, Search } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { Badge } from "./ui/badge";
-import { Slider } from "./ui/slider";
-import { Label } from "./ui/label";
-import { ScrollArea } from "./ui/scroll-area";
-import { Input } from "./ui/input";
+import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
+import { Badge } from "../components/ui/badge";
+import { Slider } from "../components/ui/slider";
+import { Label } from "../components/ui/label";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { Input } from "../components/ui/input";
 
 interface Contact {
   id: string;
@@ -19,14 +20,11 @@ interface Contact {
 }
 
 interface QuickGatheringPageProps {
-  onBack: () => void;
   contacts: Contact[];
 }
 
-export function QuickGatheringPage({
-  onBack,
-  contacts,
-}: QuickGatheringPageProps) {
+export function QuickGatheringPage({ contacts }: QuickGatheringPageProps) {
+  const navigate = useNavigate();
   const [radius, setRadius] = useState<number>(5); // km
   const [duration, setDuration] = useState<string>("1"); // hours
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
@@ -62,7 +60,7 @@ export function QuickGatheringPage({
         >
           <Button
             variant="ghost"
-            onClick={onBack}
+            onClick={() => navigate("/events")}
             className="text-[#8b8475] hover:text-[#8b8475] hover:bg-[#e8e4d9]/60 -ml-2 group h-8 md:h-10 px-2 md:px-4 text-xs md:text-sm"
           >
             <ArrowLeft className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2 transition-transform group-hover:-translate-x-1" />

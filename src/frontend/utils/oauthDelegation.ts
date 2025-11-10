@@ -1,6 +1,7 @@
-import { Identity } from "@dfinity/agent";
+import { Identity, ActorSubclass } from "@dfinity/agent";
 import { Ed25519KeyIdentity } from "@dfinity/identity";
 import { AUTH_CONSTANTS, AUTH_ERRORS } from "./authConstants";
+import type { _SERVICE } from "../../declarations/backend/backend.did.d.ts";
 
 export interface OAuthProvider {
   name: string;
@@ -17,7 +18,7 @@ export interface OAuthProvider {
  * @returns Promise resolving to array of available OAuth providers
  */
 export async function getProviders(
-  backendActor: any,
+  backendActor: ActorSubclass<_SERVICE>,
 ): Promise<OAuthProvider[]> {
   return await backendActor.get_providers();
 }
@@ -66,7 +67,6 @@ async function generatePKCE() {
  * const result = await loginWithOAuth(
  *   googleProvider,
  *   backendActor,
- *   () => console.log('Success!'),
  *   (err) => console.error(err)
  * );
  * if (result) {
@@ -76,7 +76,7 @@ async function generatePKCE() {
  */
 export async function loginWithOAuth(
   provider: OAuthProvider,
-  backendActor: any,
+  backendActor: ActorSubclass<_SERVICE>,
   onSuccess?: () => void,
   onError?: (error: Error) => void,
 ): Promise<{ identity: Identity; sessionKey: Ed25519KeyIdentity } | null> {
@@ -200,13 +200,6 @@ export async function loginWithOAuth(
 
         // Log that we received the authorization code for Calendar API access
         if (code) {
-          console.log(
-            "✅ [OAuth] Received authorization code for Calendar API access",
-          );
-          console.log(
-            "📝 [OAuth] Code preview:",
-            code.substring(0, 20) + "...",
-          );
           // Store the code temporarily
           localStorage.setItem("ic-oauth-code", code);
 
@@ -214,9 +207,6 @@ export async function loginWithOAuth(
           if (codeVerifier) {
             try {
               const redirectUri = `${window.location.origin}${AUTH_CONSTANTS.OAUTH_CALLBACK_PATH}`;
-              console.log(
-                "🔄 [OAuth] Exchanging authorization code for access tokens...",
-              );
 
               const tokenResult = await backendActor.exchange_oauth_code({
                 code,
@@ -225,17 +215,6 @@ export async function loginWithOAuth(
               });
 
               if ("Ok" in tokenResult) {
-                console.log(
-                  "✅ [OAuth] Tokens exchanged and stored in backend successfully!",
-                );
-                console.log("📊 [OAuth] Token info:", {
-                  hasAccessToken: !!tokenResult.Ok.access_token,
-                  hasRefreshToken:
-                    tokenResult.Ok.refresh_token &&
-                    tokenResult.Ok.refresh_token.length > 0,
-                  expiresIn: tokenResult.Ok.expires_in,
-                });
-
                 // Store tokens in localStorage for frontend use
                 localStorage.setItem(
                   AUTH_CONSTANTS.STORAGE_KEY_ACCESS_TOKEN,
@@ -277,7 +256,6 @@ export async function loginWithOAuth(
           console.warn(
             "⚠️ [OAuth] No authorization code received - Calendar API access will not work",
           );
-          console.log("🔍 [OAuth] Response type was:", provider.response_type);
         }
       } catch (e) {
         console.error("❌ [OAuth] Failed to parse JWT payload:", e);

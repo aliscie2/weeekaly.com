@@ -1,7 +1,8 @@
 import { useState, useRef } from "react";
 import { motion } from "motion/react";
-import { Button } from "./ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { useNavigate } from "react-router-dom";
+import { Button } from "../components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import {
   Star,
   Trash2,
@@ -14,10 +15,10 @@ import {
   Camera,
   ArrowLeft,
 } from "lucide-react";
-import { Card } from "./ui/card";
-import { Separator } from "./ui/separator";
-import { ScrollArea } from "./ui/scroll-area";
-import { Input } from "./ui/input";
+import { Card } from "../components/ui/card";
+import { Separator } from "../components/ui/separator";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { Input } from "../components/ui/input";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -41,7 +42,6 @@ interface ProfilePageProps {
   onUpdateDescription: (desc: string) => void;
   onUpdateUsername?: (name: string) => void;
   onStartAvatarEdit?: (imageSrc: string) => void;
-  onBack: () => void;
 }
 
 export function ProfilePage({
@@ -56,8 +56,8 @@ export function ProfilePage({
   onUpdateDescription,
   onUpdateUsername,
   onStartAvatarEdit,
-  onBack,
 }: ProfilePageProps) {
+  const navigate = useNavigate();
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedUsername, setEditedUsername] = useState(username);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -153,7 +153,7 @@ export function ProfilePage({
         >
           <Button
             variant="ghost"
-            onClick={onBack}
+            onClick={() => navigate("/")}
             className="text-[#8b8475] hover:text-[#8b8475] hover:bg-[#e8e4d9]/60 -ml-2 group"
           >
             <ArrowLeft className="h-4 w-4 mr-2 transition-transform group-hover:-translate-x-1" />
