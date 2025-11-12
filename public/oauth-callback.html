@@ -50,9 +50,6 @@
 
     <script>
       window.onload = () => {
-        console.log("OAuth callback page loaded");
-        console.log("Full URL:", window.location.href);
-
         // For hybrid flow (code id_token), Google returns BOTH in the hash fragment
         const paramsHash = new URLSearchParams(window.location.hash.slice(1));
         const id_token = paramsHash.get("id_token");
@@ -71,14 +68,6 @@
         const finalState = stateHash || stateQuery;
         const finalError = errorHash || errorQuery;
 
-        console.log("Parsed params:", {
-          id_token: id_token ? id_token.substring(0, 20) + "..." : null,
-          code: finalCode ? finalCode.substring(0, 20) + "..." : null,
-          state: finalState,
-          error: finalError,
-          source: code ? "hash" : codeQuery ? "query" : "none",
-        });
-
         if (!window.opener) {
           console.error("No opener window found");
           document.querySelector("p").textContent =
@@ -88,7 +77,6 @@
 
         if (finalError) {
           // OAuth error
-          console.log("OAuth error:", finalError);
           window.opener.postMessage(
             {
               type: "oauth_error",
@@ -99,12 +87,6 @@
           setTimeout(() => window.close(), 100);
         } else if (id_token || finalCode) {
           // Hybrid flow - send both id_token and code if available
-          console.log("✅ Sending tokens to parent window", {
-            hasIdToken: !!id_token,
-            hasCode: !!finalCode,
-            idTokenPreview: id_token ? id_token.substring(0, 20) + "..." : null,
-            codePreview: finalCode ? finalCode.substring(0, 20) + "..." : null,
-          });
           window.opener.postMessage(
             {
               type: "oauth_success",

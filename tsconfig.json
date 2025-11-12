@@ -35,6 +35,8 @@
     "dist",
     "playwright.config.ts",
     "vitest.config.ts",
-    "src/declarations"
+    "src/declarations",
+    "**/*.test.ts",
+    "**/*.test.tsx"
   ]
 }

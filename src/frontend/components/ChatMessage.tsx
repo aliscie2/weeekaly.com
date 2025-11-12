@@ -1,10 +1,23 @@
 import { motion } from "motion/react";
+import { EventCard } from "./EventCard";
+import { MarkdownText } from "./MarkdownText";
+
+// Internal type - not exported
+type EventCardData = {
+  title: string;
+  start: Date;
+  end: Date;
+  attendees?: string[];
+  action?: "created" | "updated" | "deleted";
+};
 
 interface Message {
   id: string;
   text: string;
   isAi: boolean;
   timestamp: Date;
+  eventCard?: EventCardData;
+  eventCards?: EventCardData[];
 }
 
 interface ChatMessageProps {
@@ -43,7 +56,23 @@ export function ChatMessage({
           isHovered ? "shadow-md" : ""
         }`}
       >
-        <p className="whitespace-pre-wrap">{message.text}</p>
+        {message.isAi ? (
+          <MarkdownText text={message.text} />
+        ) : (
+          <p className="whitespace-pre-wrap">{message.text}</p>
+        )}
+        {message.eventCard && (
+          <div className="mt-3">
+            <EventCard {...message.eventCard} />
+          </div>
+        )}
+        {message.eventCards && message.eventCards.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {message.eventCards.map((card, index) => (
+              <EventCard key={index} {...card} />
+            ))}
+          </div>
+        )}
       </div>
     </motion.div>
   );

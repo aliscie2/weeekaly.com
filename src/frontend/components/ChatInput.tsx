@@ -7,6 +7,7 @@ interface ChatInputProps {
   onSendMessage: (message: string) => void;
   onFocusChange: (focused: boolean) => void;
   showSuggestions: boolean;
+  suggestions?: string[];
   isCentered?: boolean;
 }
 
@@ -14,6 +15,7 @@ export function ChatInput({
   onSendMessage,
   onFocusChange,
   showSuggestions,
+  suggestions = [],
   isCentered = false,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
@@ -72,26 +74,22 @@ export function ChatInput({
     >
       <div className={isCentered ? "w-full" : "max-w-4xl mx-auto"}>
         {/* Suggestions */}
-        {showSuggestions && (
+        {showSuggestions && suggestions.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex gap-2 mb-4"
+            className="flex flex-wrap gap-2 mb-4"
           >
-            <Button
-              onClick={() => handleSuggestionClick("Yes")}
-              variant="outline"
-              className="bg-[#e8e4d9]/50 border-[#d4cfbe]/50 text-[#8b8475] hover:bg-[#8b8475] hover:text-[#f5f3ef] transition-all duration-300"
-            >
-              Yes
-            </Button>
-            <Button
-              onClick={() => handleSuggestionClick("No")}
-              variant="outline"
-              className="bg-[#e8e4d9]/50 border-[#d4cfbe]/50 text-[#8b8475] hover:bg-[#8b8475] hover:text-[#f5f3ef] transition-all duration-300"
-            >
-              No
-            </Button>
+            {suggestions.map((suggestion, index) => (
+              <Button
+                key={index}
+                onClick={() => handleSuggestionClick(suggestion)}
+                variant="outline"
+                className="bg-[#e8e4d9]/50 border-[#d4cfbe]/50 text-[#8b8475] hover:bg-[#8b8475] hover:text-[#f5f3ef] transition-all duration-300"
+              >
+                {suggestion}
+              </Button>
+            ))}
           </motion.div>
         )}
 

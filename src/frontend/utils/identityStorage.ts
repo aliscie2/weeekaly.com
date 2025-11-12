@@ -18,7 +18,6 @@ export function storeSessionKey(sessionKey: Ed25519KeyIdentity): void {
       STORAGE_KEY_SESSION_KEY,
       JSON.stringify(sessionKey.toJSON()),
     );
-    console.log("✅ [identityStorage] Session key stored successfully");
   } catch (error) {
     console.error("❌ [identityStorage] Failed to store session key:", error);
   }
@@ -41,7 +40,6 @@ export function restoreSessionKey(): Ed25519KeyIdentity | null {
     }
 
     const sessionKey = Ed25519KeyIdentity.fromJSON(sessionKeyJson);
-    console.log("✅ [identityStorage] Session key restored successfully");
     return sessionKey;
   } catch (error) {
     console.error("❌ [identityStorage] Failed to restore session key:", error);
@@ -64,7 +62,6 @@ export function clearAllUserData(): void {
   // Clear session key
   try {
     localStorage.removeItem(STORAGE_KEY_SESSION_KEY);
-    console.log("✅ [identityStorage] Session key cleared from storage");
   } catch (error) {
     console.error("❌ [identityStorage] Failed to clear session key:", error);
   }
@@ -85,6 +82,4 @@ export function clearAllUserData(): void {
       console.error(`❌ [identityStorage] Failed to clear ${key}:`, error);
     }
   });
-
-  console.log("✅ [identityStorage] All user data cleared from storage");
 }

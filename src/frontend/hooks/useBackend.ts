@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { backendActor } from "../utils/actor";
+import { getValidAccessToken, clearTokens } from "../utils/tokenRefresh";
 
 // Define proper types for Google Calendar events
 interface GoogleCalendarEventTime {
@@ -75,8 +76,8 @@ export function useCalendarEvents(enabled: boolean = true) {
           return [];
         }
 
-        // Get the access token from localStorage (stored during OAuth flow)
-        const accessToken = localStorage.getItem("ic-access-token");
+        // Get a valid access token (will refresh if expired)
+        const accessToken = await getValidAccessToken();
 
         if (!accessToken) {
           return [];
@@ -106,9 +107,9 @@ export function useCalendarEvents(enabled: boolean = true) {
         });
 
         if (!response.ok) {
-          // If token is invalid, clear it
+          // If token is invalid, clear all tokens
           if (response.status === 401) {
-            localStorage.removeItem("ic-access-token");
+            clearTokens();
           }
 
           throw new Error(`Google Calendar API error: ${response.status}`);
@@ -160,8 +161,8 @@ export function useCreateEvent() {
         throw new Error("User not authenticated");
       }
 
-      // Get access token
-      const accessToken = localStorage.getItem("ic-access-token");
+      // Get a valid access token (will refresh if expired)
+      const accessToken = await getValidAccessToken();
       if (!accessToken) {
         throw new Error("No access token found. Please log in again.");
       }
@@ -171,7 +172,22 @@ export function useCreateEvent() {
         Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
       // Build event object
-      const event: any = {
+      type GoogleCalendarEventCreate = {
+        summary: string;
+        description: string;
+        start: { dateTime: string; timeZone: string };
+        end: { dateTime: string; timeZone: string };
+        location: string;
+        attendees: Array<{ email: string; displayName?: string }>;
+        conferenceData?: {
+          createRequest: {
+            requestId: string;
+            conferenceSolutionKey: { type: string };
+          };
+        };
+      };
+
+      const event: GoogleCalendarEventCreate = {
         summary: input.summary,
         description: input.description || "",
         start: {
@@ -210,9 +226,9 @@ export function useCreateEvent() {
       );
 
       if (!response.ok) {
-        // If token is invalid, clear it
+        // If token is invalid, clear all tokens
         if (response.status === 401) {
-          localStorage.removeItem("ic-access-token");
+          clearTokens();
           throw new Error("Session expired. Please log in again.");
         }
 
@@ -308,8 +324,8 @@ export function useUpdateEvent() {
         throw new Error("User not authenticated");
       }
 
-      // Get access token
-      const accessToken = localStorage.getItem("ic-access-token");
+      // Get a valid access token (will refresh if expired)
+      const accessToken = await getValidAccessToken();
       if (!accessToken) {
         throw new Error("No access token found. Please log in again.");
       }
@@ -319,7 +335,17 @@ export function useUpdateEvent() {
         Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
       // Build update object (only include fields that are being updated)
-      const updates: any = {};
+      type GoogleCalendarEventUpdate = {
+        summary?: string;
+        description?: string;
+        start?: { dateTime: string; timeZone: string };
+        end?: { dateTime: string; timeZone: string };
+        location?: string;
+        attendees?: Array<{ email: string; displayName?: string }>;
+        status?: string;
+      };
+
+      const updates: GoogleCalendarEventUpdate = {};
 
       if (params.updates.summary !== undefined) {
         updates.summary = params.updates.summary;
@@ -363,9 +389,9 @@ export function useUpdateEvent() {
       );
 
       if (!response.ok) {
-        // If token is invalid, clear it
+        // If token is invalid, clear all tokens
         if (response.status === 401) {
-          localStorage.removeItem("ic-access-token");
+          clearTokens();
           throw new Error("Session expired. Please log in again.");
         }
 
@@ -455,8 +481,8 @@ export function useDeleteEvent() {
         throw new Error("User not authenticated");
       }
 
-      // Get access token
-      const accessToken = localStorage.getItem("ic-access-token");
+      // Get a valid access token (will refresh if expired)
+      const accessToken = await getValidAccessToken();
       if (!accessToken) {
         throw new Error("No access token found. Please log in again.");
       }
@@ -473,9 +499,9 @@ export function useDeleteEvent() {
       );
 
       if (!response.ok) {
-        // If token is invalid, clear it
+        // If token is invalid, clear all tokens
         if (response.status === 401) {
-          localStorage.removeItem("ic-access-token");
+          clearTokens();
           throw new Error("Session expired. Please log in again.");
         }
 

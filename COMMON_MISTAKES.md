@@ -1,14 +1,6 @@
-<!--  please make sure to keep this concise and avoid any repetition specially if something are already mentioned in other .md files -->
+# Common Mistakes & Lessons Learned
 
-As an AI you have the habit of removing an existing functionalities
-
-So every time when you make a checklist you make two checklist
-
-One for the existing functionality that we don't want to remove
-
-And one for the functionalities that we want to implement
-
-# 📚 Lessons Learned - Critical Mistakes to Avoid
+Critical mistakes encountered during development and how to avoid them.
 
 ## Overview
 

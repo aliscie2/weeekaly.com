@@ -22,7 +22,7 @@ function initCanisterIds() {
       readFileSync(path.resolve(".dfx", "local", "canister_ids.json"), "utf8"),
     );
   } catch (error) {
-    console.log("No local canister_ids.json found.");
+    // No local canister_ids.json found
   }
   try {
     prodCanisters = JSON.parse(
@@ -30,7 +30,7 @@ function initCanisterIds() {
     );
     localEnv = false;
   } catch (error) {
-    console.log("No production canister_ids.json found.");
+    // No production canister_ids.json found
   }
 
   network = process.env.NODE_ENV === "production" && !localEnv ? "ic" : "local";

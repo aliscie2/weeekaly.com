@@ -13,6 +13,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { backendActor, setAuthenticatedActor } from "./utils/actor";
 import { useHelloWorld, useCalendarEvents } from "./hooks/useBackend";
 import { useOAuthIdentity } from "./hooks/useOAuthIdentity";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { DiagnosticPanel } from "./components/DiagnosticPanel";
 
 // Pages
 import { LandingPage } from "./pages/LandingPage";
@@ -698,9 +700,12 @@ const DeleteAvailabilityWrapper = memo(function DeleteAvailabilityWrapper({
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Toaster />
-      <AppContent />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Toaster />
+        <AppContent />
+        {import.meta.env.VITE_DFX_NETWORK =="local" && <DiagnosticPanel />}
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

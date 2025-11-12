@@ -22,12 +22,27 @@ import {
 } from "../components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { AUTH_CONSTANTS } from "../utils/authConstants";
+import { useAIAgent } from "../hooks/useAIAgent";
+import { useCalendarEvents } from "../hooks/useBackend";
+import { EventFormModal } from "../components/EventFormModal";
+import { startOfDay, endOfDay } from "date-fns";
+
+// Define EventCardData locally since it's not exported from ChatMessage
+type EventCardData = {
+  title: string;
+  start: Date;
+  end: Date;
+  attendees?: string[];
+  action?: "created" | "updated" | "deleted";
+};
 
 interface Message {
   id: string;
   text: string;
   isAi: boolean;
   timestamp: Date;
+  eventCard?: EventCardData;
+  eventCards?: EventCardData[];
 }
 
 interface TimeSlot {
@@ -57,13 +72,8 @@ interface ContactPageProps {
   newEventCount: number;
 }
 
-const QUESTIONS = [
-  "Welcome! I'm here to help you build your dream software system. What type of project are you looking to create?",
-  "What's the main problem you're trying to solve with this software?",
-  "Who will be the primary users of your system?",
-  "Do you have a specific timeline in mind for this project?",
-  "What's your budget range for this project?",
-];
+const WELCOME_MESSAGE =
+  "Hi! I can help you manage your calendar. Try: 'Meeting tomorrow at 3pm' or 'Delete the team meeting'.";
 
 // Helper functions
 const getDaysData = (startDate: Date, count: number): DayAvailability[] => {
@@ -142,11 +152,21 @@ export function ContactPage({
 }: ContactPageProps) {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [currentSuggestions, setCurrentSuggestions] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
+
+  // Get calendar events
+  const { data: calendarEvents = [] } = useCalendarEvents();
+
+  // AI Agent integration
+  const { processMessage, isProcessing, eventActions } = useAIAgent(
+    calendarEvents,
+    availabilities,
+    messages,
+  );
 
   // Get Google user avatar from localStorage
   const [userAvatar, setUserAvatar] = useState("");
@@ -170,16 +190,50 @@ export function ContactPage({
   }, [messages]);
 
   useEffect(() => {
-    // Only add welcome message once, even in React Strict Mode
+    // Only add welcome message once
     if (!hasInitialized.current && messages.length === 0) {
       hasInitialized.current = true;
       setTimeout(() => {
-        addAiMessage(QUESTIONS[0]);
+        // Check if there are events today
+        const today = new Date();
+        const todayStart = startOfDay(today);
+        const todayEnd = endOfDay(today);
+
+        const todayEvents = calendarEvents.filter((event) => {
+          if (!event.start?.dateTime) return false;
+          const eventStart = new Date(event.start.dateTime);
+          return eventStart >= todayStart && eventStart <= todayEnd;
+        });
+
+        if (todayEvents.length > 0) {
+          // Show the first event with countdown
+          const firstEvent = todayEvents[0];
+          const eventStart = new Date(firstEvent.start!.dateTime!);
+          const eventEnd = new Date(firstEvent.end!.dateTime!);
+
+          addAiMessage(
+            `You have ${todayEvents.length} event${todayEvents.length > 1 ? "s" : ""} today. Here's your next one:`,
+            [],
+            {
+              title: firstEvent.summary || "Untitled Event",
+              start: eventStart,
+              end: eventEnd,
+              action: undefined,
+            },
+          );
+        } else {
+          addAiMessage(WELCOME_MESSAGE);
+        }
       }, 800);
     }
-  }, []);
+  }, [calendarEvents]);
 
-  const addAiMessage = (text: string) => {
+  const addAiMessage = (
+    text: string,
+    suggestions: string[] = [],
+    eventCard?: any,
+    eventCards?: any[],
+  ) => {
     setMessages((prev) => [
       ...prev,
       {
@@ -187,8 +241,11 @@ export function ContactPage({
         text,
         isAi: true,
         timestamp: new Date(),
+        eventCard,
+        eventCards,
       },
     ]);
+    setCurrentSuggestions(suggestions);
   };
 
   const addUserMessage = (text: string) => {
@@ -201,24 +258,69 @@ export function ContactPage({
         timestamp: new Date(),
       },
     ]);
-
-    setTimeout(() => {
-      if (currentQuestion < QUESTIONS.length - 1) {
-        setCurrentQuestion((prev) => prev + 1);
-        addAiMessage(QUESTIONS[currentQuestion + 1]);
-      } else if (currentQuestion === QUESTIONS.length - 1) {
-        addAiMessage(
-          "Thank you for sharing! Based on your responses, I'd love to know more. Is there anything specific you'd like to add about your vision?",
-        );
-        setCurrentQuestion((prev) => prev + 1);
-      }
-    }, 800);
   };
 
-  const handleSendMessage = (text: string) => {
-    if (text.trim()) {
-      addUserMessage(text);
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim() || isProcessing) {
+      return;
     }
+
+    addUserMessage(text);
+    setCurrentSuggestions([]);
+
+    const response = await processMessage(text);
+
+    // Create event cards from actions
+    const createEventCard = (action: any) => {
+      if (action.type === "ADD_EVENT" && action.start && action.end) {
+        return {
+          title: action.title || "New Event",
+          start: new Date(action.start),
+          end: new Date(action.end),
+          attendees: action.attendees,
+          action: "created" as const,
+        };
+      } else if (action.type === "UPDATE_EVENT" && action.changes) {
+        return {
+          title: action.changes.title || action.event_title || "Event",
+          start: action.changes.start
+            ? new Date(action.changes.start)
+            : new Date(),
+          end: action.changes.end ? new Date(action.changes.end) : new Date(),
+          attendees: action.changes.attendees,
+          action: "updated" as const,
+        };
+      } else if (action.type === "DELETE_EVENT") {
+        return {
+          title: action.event_title || "Event",
+          start: new Date(),
+          end: new Date(),
+          action: "deleted" as const,
+        };
+      }
+      return null;
+    };
+
+    let eventCard: EventCardData | null = null;
+    let eventCards: EventCardData[] | undefined;
+
+    // Handle multiple actions
+    if (response.actions && response.actions.length > 0) {
+      eventCards = response.actions
+        .map(createEventCard)
+        .filter((card): card is NonNullable<typeof card> => card !== null);
+    } else if (response.action) {
+      // Single action
+      eventCard = createEventCard(response.action);
+    }
+
+    // Add AI response message
+    addAiMessage(
+      response.feedback,
+      response.suggestions,
+      eventCard || undefined,
+      eventCards,
+    );
   };
 
   // Check if user has sent any messages
@@ -448,10 +550,20 @@ export function ContactPage({
             <ChatInput
               onSendMessage={handleSendMessage}
               onFocusChange={setIsInputFocused}
-              showSuggestions={currentQuestion < QUESTIONS.length}
+              showSuggestions={currentSuggestions.length > 0}
+              suggestions={currentSuggestions}
               isCentered={true}
             />
           </div>
+
+          {/* Event Form Modal */}
+          <EventFormModal
+            isOpen={eventActions.isFormOpen}
+            onClose={eventActions.closeForm}
+            onSubmit={eventActions.handleFormSubmit}
+            initialData={eventActions.formInitialData}
+            mode={eventActions.editingEventId ? "edit" : "create"}
+          />
         </div>
       ) : (
         <>
@@ -482,7 +594,17 @@ export function ContactPage({
           <ChatInput
             onSendMessage={handleSendMessage}
             onFocusChange={setIsInputFocused}
-            showSuggestions={currentQuestion < QUESTIONS.length}
+            showSuggestions={currentSuggestions.length > 0}
+            suggestions={currentSuggestions}
+          />
+
+          {/* Event Form Modal */}
+          <EventFormModal
+            isOpen={eventActions.isFormOpen}
+            onClose={eventActions.closeForm}
+            onSubmit={eventActions.handleFormSubmit}
+            initialData={eventActions.formInitialData}
+            mode={eventActions.editingEventId ? "edit" : "create"}
           />
         </>
       )}

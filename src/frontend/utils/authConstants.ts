@@ -4,8 +4,8 @@
 
 // Session and token lifetimes
 export const AUTH_CONSTANTS = {
-  // Delegation lifetime: 7 days in nanoseconds
-  MAX_TIME_TO_LIVE_NS: BigInt(7 * 24 * 60 * 60 * 1000 * 1000 * 1000),
+  // Delegation lifetime: 30 days in nanoseconds (maximum allowed by Internet Identity)
+  MAX_TIME_TO_LIVE_NS: BigInt(30 * 24 * 60 * 60 * 1000 * 1000 * 1000),
 
   // OAuth popup timeout: 5 minutes in milliseconds
   OAUTH_TIMEOUT_MS: 5 * 60 * 1000,
