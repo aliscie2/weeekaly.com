@@ -87,19 +87,10 @@ topup_backend:
 
 # Code Quality
 frontend-format:
-#  make sure to read COMMON_MISTAKES.md before u start
-# 	remove unused function, and delete unused files
-#  do not care about anything outse src/frontend
-#  fix types and avoid using any as much as possable and use meaningfull types
-#  re-run this after you fnish if there is no more warnings and error do no rerun again
-# batching chnages together, do making changes one at a time
 	npm run format & \
 	npx tsc --noUnusedLocals --noUnusedParameters --noEmit --skipLibCheck & \
 	npx ts-unused-exports tsconfig.json || true & \
 	wait
-
-# commit 
-# run `git diff --staged` see chnags and currnt code and make built points tree then `git add .` then `git commit -m '<built points>'
 
 
 pretty:
@@ -141,8 +132,6 @@ getting_pulls:
 	@echo "Usage: make getting_pulls PR=123"
 	git fetch origin pull/$(PR)/head:pr-$(PR)
 
-
-	
 upgrade-backend:
 	bash scripts/did.sh backend
 	dfx generate backend
@@ -152,9 +141,3 @@ upgrade-backend:
 
 reinstall:
 	dfx canister install backend --mode reinstall --yes
-
-
-
-testing_thumbnails:
-	cloudflared tunnel --url http://localhost:5173
-# 	addd this in in server: in  vite.config.ts allowedHosts: [ ".trycloudflare.com"],

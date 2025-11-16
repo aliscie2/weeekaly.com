@@ -27,12 +27,14 @@
 ### Event Interactions
 
 #### Desktop
+
 - **Drag to create**: Click and drag on empty space
 - **Drag to move**: Click and drag event to new time/day
 - **Resize**: Drag top/bottom handles to adjust duration
 - **Click to edit**: Click event to open edit modal
 
 #### Mobile
+
 - **Long-press to create**: Hold on empty space to start creating
 - **Touch drag**: Drag events with touch
 - **Tap to edit**: Tap event to open edit modal

@@ -1,3 +1,28 @@
+type Availability = record {
+  id : text;
+  timezone : text;
+  title : text;
+  updated_at : nat64;
+  owner : principal;
+  description : text;
+  owner_email : opt text;
+  created_at : nat64;
+  busy_times : opt vec BusyTimeBlock;
+  is_favorite : bool;
+  slots : vec TimeSlot;
+  display_order : nat32;
+  owner_name : opt text;
+};
+type BusyTimeBlock = record { end_time : nat64; start_time : nat64 };
+type CreateAvailabilityRequest = record {
+  timezone : text;
+  title : text;
+  description : text;
+  owner_email : opt text;
+  busy_times : opt vec BusyTimeBlock;
+  slots : vec TimeSlot;
+  owner_name : opt text;
+};
 type CreateEventRequest = record {
   timezone : text;
   description : opt text;
@@ -47,17 +72,30 @@ type PrepareDelegationRequest = record {
 };
 type PrepareDelegationResponse = record { expire_at : nat64 };
 type RefreshTokenRequest = record { refresh_token : text };
-type Result = variant { Ok : text; Err : text };
-type Result_1 = variant { Ok; Err : text };
-type Result_2 = variant { Ok : TokenResponse; Err : text };
-type Result_3 = variant { Ok : GetDelegationResponse; Err : text };
-type Result_4 = variant { Ok : PrepareDelegationResponse; Err : text };
+type Result = variant { Ok : Availability; Err : text };
+type Result_1 = variant { Ok : text; Err : text };
+type Result_2 = variant { Ok; Err : text };
+type Result_3 = variant { Ok : TokenResponse; Err : text };
+type Result_4 = variant { Ok : GetDelegationResponse; Err : text };
+type Result_5 = variant { Ok : PrepareDelegationResponse; Err : text };
 type SignedDelegation = record { signature : blob; delegation : Delegation };
+type TimeSlot = record {
+  end_time : nat16;
+  start_time : nat16;
+  day_of_week : nat8;
+};
 type TokenResponse = record {
   access_token : text;
   refresh_token : opt text;
   expires_in : nat64;
   token_type : text;
+};
+type UpdateAvailabilityRequest = record {
+  id : text;
+  timezone : opt text;
+  title : opt text;
+  description : opt text;
+  slots : opt vec TimeSlot;
 };
 type UpdateEventRequest = record {
   status : opt text;
@@ -78,19 +116,32 @@ type UserInfo = record {
 };
 service : () -> {
   cleanup_expired_sessions : () -> (nat64);
-  create_calendar_event : (CreateEventRequest) -> (Result);
-  delete_calendar_event : (text) -> (Result_1);
-  exchange_oauth_code : (ExchangeCodeRequest) -> (Result_2);
+  create_availability : (CreateAvailabilityRequest) -> (Result);
+  create_calendar_event : (CreateEventRequest) -> (Result_1);
+  delete_availability : (text) -> (Result_2);
+  delete_calendar_event : (text) -> (Result_2);
+  exchange_oauth_code : (ExchangeCodeRequest) -> (Result_3);
+  get_availability : (text) -> (Result) query;
   get_caller : () -> (text) query;
-  get_delegation : (GetDelegationRequest) -> (Result_3) query;
+  get_delegation : (GetDelegationRequest) -> (Result_4) query;
   get_providers : () -> (vec OAuthProvider) query;
   get_session_count : () -> (nat64) query;
   get_user_info : () -> (UserInfo) query;
   greet : (text) -> (text) query;
   hello_world : () -> (text) query;
   is_authenticated : () -> (bool) query;
-  logout : (blob) -> (Result_1);
-  prepare_delegation : (PrepareDelegationRequest) -> (Result_4);
-  refresh_google_token : (RefreshTokenRequest) -> (Result_2);
-  update_calendar_event : (UpdateEventRequest) -> (Result);
+  list_user_availabilities : () -> (vec Availability) query;
+  logout : (blob) -> (Result_2);
+  prepare_delegation : (PrepareDelegationRequest) -> (Result_5);
+  refresh_google_token : (RefreshTokenRequest) -> (Result_3);
+  regenerate_availability_id : (text) -> (Result_1);
+  search_availabilities_by_email : (text) -> (vec Availability) query;
+  search_availabilities_by_principal : (principal) -> (vec Availability) query;
+  search_availabilities_by_username : (text) -> (vec Availability) query;
+  search_by_emails : (vec text) -> (vec vec Availability) query;
+  search_by_usernames : (vec text) -> (vec vec Availability) query;
+  set_favorite_availability : (text) -> (Result_2);
+  update_availability : (UpdateAvailabilityRequest) -> (Result);
+  update_availability_busy_times : (text, vec BusyTimeBlock) -> (Result_2);
+  update_calendar_event : (UpdateEventRequest) -> (Result_1);
 }

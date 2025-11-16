@@ -7,7 +7,7 @@ Calendar and scheduling application on the Internet Computer with Google Calenda
 ```bash
 npm install
 dfx start --clean --background
-dfx build backend && dfx deploy
+dfx deploy
 npm run start
 ```
 
@@ -21,32 +21,36 @@ Open http://localhost:5173
 - Touch-optimized mobile interactions
 - OAuth via Internet Identity
 
-## Key Documentation
-
-- **[COMMON_MISTAKES.md](./COMMON_MISTAKES.md)** - Critical lessons learned (14 patterns)
-- **[CODE_QUALITY_IMPROVEMENTS.md](./CODE_QUALITY_IMPROVEMENTS.md)** - Performance optimizations
-- **[src/frontend/AIAgent/guide.md](./src/frontend/AIAgent/guide.md)** - AI agent architecture
-
 ## Development
 
 ```bash
+# Local development
+dfx deploy backend --mode upgrade    # Deploy backend changes
+npm run start                        # Start dev server
+
 # Testing
-cargo test              # Backend
-npm test               # E2E tests
+cargo test                           # Backend tests
+npm test                             # E2E tests (Playwright)
 
 # Code quality
-npm run format         # Format all code
-make frontend-format   # Check types & unused exports
+npm run format                       # Format all code
+npx tsc --noEmit                     # Type check
 
-# Deployment
-make deploy-all
+# Production deployment
+make deploy-ic                       # Deploy to IC mainnet
 ```
 
 ## Tech Stack
 
 **Backend**: Rust, IC CDK, WebSocket  
 **Frontend**: React 19, TypeScript, Vite, Tailwind  
-**State**: React Query, React hooks  
+**State**: React Query  
 **UI**: Radix UI, Motion, Sonner
 
-See `.kiro/steering/` for complete architecture details.
+## Documentation
+
+- **[COMMON_MISTAKES.md](./COMMON_MISTAKES.md)** - Critical lessons learned
+- **[GOOGLE_API_KEY_SETUP.md](./GOOGLE_API_KEY_SETUP.md)** - Google Calendar API setup
+- **[stable-struct-guide.md](./stable-struct-guide.md)** - IC stable structures guide
+- **[src/frontend/AIAgent/guide.md](./src/frontend/AIAgent/guide.md)** - AI agent architecture
+- **`.kiro/steering/`** - Complete architecture and tech stack details

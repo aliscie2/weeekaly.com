@@ -1,3 +1,10 @@
 {
-  "excludePathsFromReport": ["src/declarations"]
+  "showLineNumber": false,
+  "excludePathsFromReport": [
+    "node_modules",
+    "dist",
+    "build",
+    ".dfx",
+    "src/declarations"
+  ]
 }
