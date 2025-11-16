@@ -144,6 +144,54 @@ export function useEventActions() {
     );
   };
 
+  /**
+   * Accept an event invitation
+   */
+  const handleAcceptInvitation = (eventId: string, eventTitle: string) => {
+    updateEvent.mutate(
+      {
+        eventId,
+        updates: {
+          attendeeResponse: "accepted",
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success(`Accepted "${eventTitle}"`);
+        },
+        onError: (error: Error) => {
+          console.error("[useEventActions] ❌ Accept failed:", error);
+          const errorMessage = error.message || "Unknown error";
+          toast.error(`Failed to accept invitation: ${errorMessage}`);
+        },
+      },
+    );
+  };
+
+  /**
+   * Decline an event invitation
+   */
+  const handleDeclineInvitation = (eventId: string, eventTitle: string) => {
+    updateEvent.mutate(
+      {
+        eventId,
+        updates: {
+          attendeeResponse: "declined",
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success(`Declined "${eventTitle}"`);
+        },
+        onError: (error: Error) => {
+          console.error("[useEventActions] ❌ Decline failed:", error);
+          const errorMessage = error.message || "Unknown error";
+          toast.error(`Failed to decline invitation: ${errorMessage}`);
+        },
+      },
+    );
+  };
+
   return {
     // Form state
     isFormOpen,
@@ -161,6 +209,8 @@ export function useEventActions() {
     // Event actions
     handleDeleteEvent,
     handleCancelAttendance,
+    handleAcceptInvitation,
+    handleDeclineInvitation,
 
     // Mutation states
     isCreating: createEvent.isPending,

@@ -1,4 +1,12 @@
-import { useState, useEffect, useCallback, useMemo, memo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  memo,
+  lazy,
+  Suspense,
+} from "react";
 import {
   BrowserRouter,
   Routes,
@@ -11,20 +19,53 @@ import { toast } from "sonner";
 import { Toaster } from "./components/ui/sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { backendActor, setAuthenticatedActor } from "./utils/actor";
-import { useHelloWorld, useCalendarEvents } from "./hooks/useBackend";
+import {
+  useHelloWorld,
+  useCalendarEvents,
+  useAvailabilities,
+  useAvailabilityById,
+} from "./hooks/useBackend";
 import { useOAuthIdentity } from "./hooks/useOAuthIdentity";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DiagnosticPanel } from "./components/DiagnosticPanel";
+import { Button } from "./components/ui/button";
 
-// Pages
+// Eager load critical pages
 import { LandingPage } from "./pages/LandingPage";
 import { ContactPage } from "./pages/ContactPage";
-import { AvailabilityPage } from "./pages/AvailabilityPage";
-import { ProfilePage } from "./pages/ProfilePage";
-import { AvatarEditPage } from "./pages/AvatarEditPage";
-import { EventsPage } from "./pages/EventsPage";
-import { DeleteConfirmationPage } from "./pages/DeleteConfirmationPage";
-import { QuickGatheringPage } from "./pages/QuickGatheringPage";
+
+// Lazy load non-critical pages for code splitting
+const AvailabilityPage = lazy(() =>
+  import("./pages/AvailabilityPage/index").then((m) => ({
+    default: m.AvailabilityPage,
+  })),
+);
+const ProfilePage = lazy(() =>
+  import("./pages/ProfilePage").then((m) => ({ default: m.ProfilePage })),
+);
+const AvatarEditPage = lazy(() =>
+  import("./pages/AvatarEditPage").then((m) => ({ default: m.AvatarEditPage })),
+);
+const EventsPage = lazy(() =>
+  import("./pages/EventsPage").then((m) => ({ default: m.EventsPage })),
+);
+const DeleteConfirmationPage = lazy(() =>
+  import("./pages/DeleteConfirmationPage").then((m) => ({
+    default: m.DeleteConfirmationPage,
+  })),
+);
+const QuickGatheringPage = lazy(() =>
+  import("./pages/QuickGatheringPage").then((m) => ({
+    default: m.QuickGatheringPage,
+  })),
+);
+
+// Loading component for lazy-loaded routes
+const PageLoader = () => (
+  <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5f3ef] via-[#ebe8e0] to-[#e8e4d9]">
+    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+  </div>
+);
 
 // Types
 interface Availability {
@@ -88,6 +129,7 @@ function AppContent() {
         })
         .then(async () => {
           queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
+          queryClient.invalidateQueries({ queryKey: ["availabilities"] });
 
           // Update profile with Google user data
           const name = localStorage.getItem("ic-user-name") || "";
@@ -105,9 +147,27 @@ function AppContent() {
   // Use React Query to fetch backend data
   useHelloWorld();
   useCalendarEvents(isAuthenticated);
+  const { data: backendAvailabilities = [] } =
+    useAvailabilities(isAuthenticated);
 
   // Mobile detection
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  // Track current start dates for each availability (for navigation)
+  const [availabilityDates, setAvailabilityDates] = useState<
+    Record<string, Date>
+  >({});
+
+  // Convert backend availabilities to app format
+  const availabilities = useMemo(() => {
+    return backendAvailabilities.map((avail: any) => ({
+      id: avail.id,
+      name: avail.title,
+      currentStartDate:
+        availabilityDates[avail.id] ||
+        (isMobile ? new Date() : getStartOfWeek(new Date())),
+    }));
+  }, [backendAvailabilities, isMobile, availabilityDates]);
 
   // Events state
   const [events] = useState<Event[]>([
@@ -228,20 +288,6 @@ function AppContent() {
     },
   ];
 
-  // Availabilities state
-  const [availabilities, setAvailabilities] = useState<Availability[]>([
-    {
-      id: "1",
-      name: "Business Meetings",
-      currentStartDate: isMobile ? new Date() : getStartOfWeek(new Date()),
-    },
-    {
-      id: "2",
-      name: "Family Meetings",
-      currentStartDate: isMobile ? new Date() : getStartOfWeek(new Date()),
-    },
-  ]);
-
   // Profile state
   const [username, setUsername] = useState("John Doe");
   const [userAvatar, setUserAvatar] = useState(
@@ -255,21 +301,12 @@ function AppContent() {
   // Handle window resize
   useEffect(() => {
     const handleResize = () => {
-      const wasMobile = isMobile;
-      const nowMobile = window.innerWidth < 768;
-      setIsMobile(nowMobile);
-
-      if (wasMobile !== nowMobile) {
-        const startDate = nowMobile ? new Date() : getStartOfWeek(new Date());
-        setAvailabilities((prev) =>
-          prev.map((avail) => ({ ...avail, currentStartDate: startDate })),
-        );
-      }
+      setIsMobile(window.innerWidth < 768);
     };
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [isMobile]);
+  }, []);
 
   // No automatic redirect - homepage handles auth state
 
@@ -292,31 +329,6 @@ function AppContent() {
     navigate("/");
   };
 
-  const handleShareAvailability = useCallback(
-    (availabilityId: string) => {
-      const availability = availabilities.find((a) => a.id === availabilityId);
-      if (availability) {
-        const shareUrl = `${window.location.origin}/availability/${availabilityId}`;
-        const textarea = document.createElement("textarea");
-        textarea.value = shareUrl;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-
-        try {
-          document.execCommand("copy");
-          toast.success(`Link for "${availability.name}" copied to clipboard!`);
-        } catch (err) {
-          toast.error("Failed to copy link");
-        } finally {
-          document.body.removeChild(textarea);
-        }
-      }
-    },
-    [availabilities],
-  );
-
   const handleDeleteAvailability = useCallback(
     (availabilityId: string) => {
       navigate(`/delete-availability/${availabilityId}`);
@@ -325,60 +337,81 @@ function AppContent() {
   );
 
   const handleConfirmDeleteAvailability = useCallback(
-    (availabilityId: string) => {
+    async (availabilityId: string) => {
       const availability = availabilities.find((a) => a.id === availabilityId);
-      setAvailabilities((prev) => prev.filter((a) => a.id !== availabilityId));
-      toast.success(`"${availability?.name}" deleted successfully!`);
-      navigate("/");
+
+      try {
+        console.log("[App] 🗑️ Deleting availability:", availabilityId);
+
+        const result = await backendActor.delete_availability(availabilityId);
+
+        if ("Err" in result) {
+          console.error("[App] ❌ Delete failed:", result.Err);
+          toast.error(`Failed to delete: ${result.Err}`);
+          return;
+        }
+
+        console.log("[App] ✅ Availability deleted");
+
+        // Invalidate cache to refresh the list
+        queryClient.invalidateQueries({ queryKey: ["availabilities"] });
+
+        toast.success(`"${availability?.name}" deleted successfully!`);
+        navigate("/");
+      } catch (error) {
+        console.error("[App] ❌ Delete error:", error);
+        toast.error("Failed to delete availability");
+      }
     },
-    [availabilities, navigate],
+    [availabilities, navigate, queryClient],
   );
 
   const handleAvailabilityPreviousWeek = useCallback(
     (availabilityId: string) => {
-      setAvailabilities((prev) =>
-        prev.map((avail) => {
-          if (avail.id === availabilityId) {
-            const newStart = new Date(avail.currentStartDate);
-            const daysToSubtract = isMobile ? 2 : 7;
-            newStart.setDate(avail.currentStartDate.getDate() - daysToSubtract);
-            return { ...avail, currentStartDate: newStart };
-          }
-          return avail;
-        }),
-      );
+      setAvailabilityDates((prev) => {
+        const currentDate =
+          prev[availabilityId] ||
+          (isMobile ? new Date() : getStartOfWeek(new Date()));
+        const newDate = new Date(currentDate);
+        if (isMobile) {
+          // Move back 2 days for mobile
+          newDate.setDate(newDate.getDate() - 2);
+        } else {
+          // Move back 7 days for desktop
+          newDate.setDate(newDate.getDate() - 7);
+        }
+        return { ...prev, [availabilityId]: newDate };
+      });
     },
     [isMobile],
   );
 
   const handleAvailabilityNextWeek = useCallback(
     (availabilityId: string) => {
-      setAvailabilities((prev) =>
-        prev.map((avail) => {
-          if (avail.id === availabilityId) {
-            const newStart = new Date(avail.currentStartDate);
-            const daysToAdd = isMobile ? 2 : 7;
-            newStart.setDate(avail.currentStartDate.getDate() + daysToAdd);
-            return { ...avail, currentStartDate: newStart };
-          }
-          return avail;
-        }),
-      );
+      setAvailabilityDates((prev) => {
+        const currentDate =
+          prev[availabilityId] ||
+          (isMobile ? new Date() : getStartOfWeek(new Date()));
+        const newDate = new Date(currentDate);
+        if (isMobile) {
+          // Move forward 2 days for mobile
+          newDate.setDate(newDate.getDate() + 2);
+        } else {
+          // Move forward 7 days for desktop
+          newDate.setDate(newDate.getDate() + 7);
+        }
+        return { ...prev, [availabilityId]: newDate };
+      });
     },
     [isMobile],
   );
 
   const handleAvailabilityToday = useCallback(
     (availabilityId: string) => {
-      setAvailabilities((prev) =>
-        prev.map((avail) => {
-          if (avail.id === availabilityId) {
-            const newStart = isMobile ? new Date() : getStartOfWeek(new Date());
-            return { ...avail, currentStartDate: newStart };
-          }
-          return avail;
-        }),
-      );
+      setAvailabilityDates((prev) => {
+        const today = isMobile ? new Date() : getStartOfWeek(new Date());
+        return { ...prev, [availabilityId]: today };
+      });
     },
     [isMobile],
   );
@@ -497,113 +530,114 @@ function AppContent() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-[#f5f3ef] via-[#ebe8e0] to-[#e8e4d9]">
-      <Routes>
-        {/* Homepage - Shows Landing or Contact based on auth */}
-        <Route
-          path="/"
-          element={
-            isAuthenticated ? (
-              <ContactPage
-                availabilities={availabilities}
-                isMobile={isMobile}
-                onShareAvailability={handleShareAvailability}
-                onDeleteAvailability={handleDeleteAvailability}
-                getTodayEventCount={getTodayEventCount}
-                newEventCount={newEventCount}
-              />
-            ) : (
-              <LandingPage onLogin={handleLogin} />
-            )
-          }
-        />
-
-        {/* Contact Page (Chat) - Redirect to homepage if not authenticated */}
-        <Route path="/contact" element={<Navigate to="/" replace />} />
-
-        {/* Availability Page */}
-        <Route
-          path="/availability/:id"
-          element={
-            <ProtectedRoute>
-              <AvailabilityPageWrapper
-                availabilities={availabilities}
-                isMobile={isMobile}
-                onPreviousWeek={handleAvailabilityPreviousWeek}
-                onNextWeek={handleAvailabilityNextWeek}
-                onToday={handleAvailabilityToday}
-                isCurrentWeek={isAvailabilityCurrentWeek}
-              />
-            </ProtectedRoute>
-          }
-        />
-
-        {/* Profile Page */}
-        <Route
-          path="/profile"
-          element={
-            <ProtectedRoute>
-              <ProfilePage
-                username={username}
-                userAvatar={userAvatar}
-                description={description}
-                onLogout={handleLogout}
-                onUpdateDescription={handleUpdateDescription}
-              />
-            </ProtectedRoute>
-          }
-        />
-
-        {/* Avatar Edit Page */}
-        <Route
-          path="/avatar-edit"
-          element={
-            <ProtectedRoute>
-              {avatarImageSrc && (
-                <AvatarEditPage
-                  imageSrc={avatarImageSrc}
-                  onSave={handleSaveAvatar}
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          {/* Homepage - Shows Landing or Contact based on auth */}
+          <Route
+            path="/"
+            element={
+              isAuthenticated ? (
+                <ContactPage
+                  availabilities={availabilities}
+                  isMobile={isMobile}
+                  onDeleteAvailability={handleDeleteAvailability}
+                  getTodayEventCount={getTodayEventCount}
+                  newEventCount={newEventCount}
                 />
-              )}
-            </ProtectedRoute>
-          }
-        />
+              ) : (
+                <LandingPage onLogin={handleLogin} />
+              )
+            }
+          />
 
-        {/* Events Page */}
-        <Route
-          path="/events"
-          element={
-            <ProtectedRoute>
-              <EventsPage currentUserId={CURRENT_USER_ID} />
-            </ProtectedRoute>
-          }
-        />
+          {/* Contact Page (Chat) - Redirect to homepage if not authenticated */}
+          <Route path="/contact" element={<Navigate to="/" replace />} />
 
-        {/* Quick Gathering Page */}
-        <Route
-          path="/quick-gathering"
-          element={
-            <ProtectedRoute>
-              <QuickGatheringPage contacts={mockContacts} />
-            </ProtectedRoute>
-          }
-        />
+          {/* Availability Page */}
+          <Route
+            path="/availability/:id"
+            element={
+              <ProtectedRoute>
+                <AvailabilityPageWrapper
+                  availabilities={availabilities}
+                  isMobile={isMobile}
+                  onPreviousWeek={handleAvailabilityPreviousWeek}
+                  onNextWeek={handleAvailabilityNextWeek}
+                  onToday={handleAvailabilityToday}
+                  isCurrentWeek={isAvailabilityCurrentWeek}
+                />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Delete Availability Confirmation */}
-        <Route
-          path="/delete-availability/:id"
-          element={
-            <ProtectedRoute>
-              <DeleteAvailabilityWrapper
-                availabilities={availabilities}
-                onConfirm={handleConfirmDeleteAvailability}
-              />
-            </ProtectedRoute>
-          }
-        />
+          {/* Profile Page */}
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage
+                  username={username}
+                  userAvatar={userAvatar}
+                  description={description}
+                  onLogout={handleLogout}
+                  onUpdateDescription={handleUpdateDescription}
+                />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Catch all - redirect to landing */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Avatar Edit Page */}
+          <Route
+            path="/avatar-edit"
+            element={
+              <ProtectedRoute>
+                {avatarImageSrc && (
+                  <AvatarEditPage
+                    imageSrc={avatarImageSrc}
+                    onSave={handleSaveAvatar}
+                  />
+                )}
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Events Page */}
+          <Route
+            path="/events"
+            element={
+              <ProtectedRoute>
+                <EventsPage currentUserId={CURRENT_USER_ID} />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Quick Gathering Page */}
+          <Route
+            path="/quick-gathering"
+            element={
+              <ProtectedRoute>
+                <QuickGatheringPage contacts={mockContacts} />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Delete Availability Confirmation */}
+          <Route
+            path="/delete-availability/:id"
+            element={
+              <ProtectedRoute>
+                <DeleteAvailabilityWrapper
+                  availabilities={availabilities}
+                  onConfirm={handleConfirmDeleteAvailability}
+                />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Catch all - redirect to landing */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </div>
   );
 }
@@ -627,31 +661,203 @@ const AvailabilityPageWrapper = memo(function AvailabilityPageWrapper({
   isCurrentWeek,
 }: AvailabilityPageWrapperProps) {
   const { id } = useParams();
-  const availability = availabilities.find((a: Availability) => a.id === id);
+  const navigate = useNavigate();
+
+  // Check if this is the user's own availability
+  const ownAvailability = availabilities.find((a: Availability) => a.id === id);
+
+  // If not found in user's list, try to fetch from backend (someone else's availability)
+  const {
+    data: fetchedAvailability,
+    isLoading,
+    error,
+  } = useAvailabilityById(
+    id,
+    !ownAvailability && !!id, // Only fetch if not in user's list
+  );
+
+  // Get current user's availabilities (for mutual availability feature)
+  // MUST be called before any conditional returns (React hooks rule)
+  const { data: backendAvailabilities = [] } = useAvailabilities();
+
+  // Local state for shared availability navigation (when viewing someone else's availability)
+  // FIX: Navigation buttons weren't working in sharing mode because parent state only tracks
+  // availabilities in the user's own list. For shared availabilities, we maintain local state.
+  const [sharedAvailabilityDate, setSharedAvailabilityDate] = useState<Date>(
+    () => (isMobile ? new Date() : getStartOfWeek(new Date())),
+  );
+
+  // Determine if viewing someone else's availability
+  const isViewingOthers = !ownAvailability && !!fetchedAvailability;
 
   // Memoize the callback functions to prevent AvailabilityPage from re-rendering
   const handlePreviousWeek = useCallback(() => {
-    if (id) onPreviousWeek(id);
-  }, [id, onPreviousWeek]);
+    console.log("[AvailabilityPageWrapper] ⬅️ Previous week clicked, id:", id);
+    if (isViewingOthers) {
+      // For shared availabilities, update local state
+      setSharedAvailabilityDate((prev) => {
+        const newDate = new Date(prev);
+        if (isMobile) {
+          newDate.setDate(newDate.getDate() - 2); // Move back 2 days for mobile
+        } else {
+          newDate.setDate(newDate.getDate() - 7); // Move back 7 days for desktop
+        }
+        return newDate;
+      });
+    } else if (id) {
+      // For own availabilities, use parent state management
+      onPreviousWeek(id);
+    }
+  }, [id, isViewingOthers, isMobile, onPreviousWeek]);
 
   const handleNextWeek = useCallback(() => {
-    if (id) onNextWeek(id);
-  }, [id, onNextWeek]);
+    console.log("[AvailabilityPageWrapper] ➡️ Next week clicked, id:", id);
+    if (isViewingOthers) {
+      // For shared availabilities, update local state
+      setSharedAvailabilityDate((prev) => {
+        const newDate = new Date(prev);
+        if (isMobile) {
+          newDate.setDate(newDate.getDate() + 2); // Move forward 2 days for mobile
+        } else {
+          newDate.setDate(newDate.getDate() + 7); // Move forward 7 days for desktop
+        }
+        return newDate;
+      });
+    } else if (id) {
+      // For own availabilities, use parent state management
+      onNextWeek(id);
+    }
+  }, [id, isViewingOthers, isMobile, onNextWeek]);
 
   const handleToday = useCallback(() => {
-    if (id) onToday(id);
-  }, [id, onToday]);
+    console.log("[AvailabilityPageWrapper] 📍 Today clicked, id:", id);
+    if (isViewingOthers) {
+      // For shared availabilities, update local state
+      const today = isMobile ? new Date() : getStartOfWeek(new Date());
+      setSharedAvailabilityDate(today);
+    } else if (id) {
+      // For own availabilities, use parent state management
+      onToday(id);
+    }
+  }, [id, isViewingOthers, isMobile, onToday]);
 
   const isCurrentWeekValue = useMemo(() => {
+    if (isViewingOthers) {
+      // For shared availabilities, check against local state
+      if (isMobile) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const current = new Date(sharedAvailabilityDate);
+        current.setHours(0, 0, 0, 0);
+        const daysDiff = Math.floor(
+          (current.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+        );
+        return daysDiff >= 0 && daysDiff <= 1;
+      } else {
+        const todayWeekStart = getStartOfWeek(new Date());
+        return sharedAvailabilityDate.getTime() === todayWeekStart.getTime();
+      }
+    }
     return id ? isCurrentWeek(id) : false;
-  }, [id, isCurrentWeek]);
+  }, [id, isViewingOthers, isMobile, sharedAvailabilityDate, isCurrentWeek]);
+
+  // Loading state while fetching someone else's availability
+  if (!ownAvailability && isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5f3ef] via-[#ebe8e0] to-[#e8e4d9]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p className="text-[#8b8475]">Loading availability...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state - availability doesn't exist (404)
+  if (!ownAvailability && (error || !fetchedAvailability)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5f3ef] via-[#ebe8e0] to-[#e8e4d9] px-4">
+        <div className="text-center max-w-md">
+          <h1 className="text-6xl font-bold text-[#8b8475] mb-4">404</h1>
+          <h2 className="text-2xl font-semibold text-[#8b8475] mb-4">
+            Availability Not Found
+          </h2>
+          <p className="text-[#a8a195] mb-8">
+            The availability you're looking for doesn't exist or has been
+            removed.
+          </p>
+          <Button
+            onClick={() => navigate("/")}
+            className="bg-[#8b8475] hover:bg-[#6d6659] text-white"
+          >
+            Go Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Determine which availability to use
+  const availability =
+    ownAvailability ||
+    (fetchedAvailability
+      ? {
+          id: fetchedAvailability.id,
+          name: fetchedAvailability.title,
+          currentStartDate: sharedAvailabilityDate, // Use local state for shared availabilities
+        }
+      : null);
 
   if (!availability || !id) {
     return <Navigate to="/" replace />;
   }
 
+  // Get slots and owner info from fetched availability if viewing someone else's
+  const slots = fetchedAvailability?.slots;
+
+  // DEBUG: Log the raw response from backend
+  console.log(
+    "[AvailabilityPageWrapper] 🔍 Raw fetchedAvailability:",
+    fetchedAvailability,
+  );
+  console.log(
+    "[AvailabilityPageWrapper] 🔍 All keys:",
+    fetchedAvailability ? Object.keys(fetchedAvailability) : "none",
+  );
+
+  // Handle Rust Option<String> which might be serialized as [] or [value]
+  const rawOwnerEmail = (fetchedAvailability as any)?.owner_email;
+  const rawOwnerName = (fetchedAvailability as any)?.owner_name;
+
+  console.log("[AvailabilityPageWrapper] 📧 Raw owner_email:", rawOwnerEmail);
+  console.log("[AvailabilityPageWrapper] 📧 Raw owner_name:", rawOwnerName);
+
+  const ownerEmail = Array.isArray(rawOwnerEmail)
+    ? rawOwnerEmail.length > 0
+      ? rawOwnerEmail[0]
+      : undefined
+    : rawOwnerEmail;
+  const ownerName = Array.isArray(rawOwnerName)
+    ? rawOwnerName.length > 0
+      ? rawOwnerName[0]
+      : undefined
+    : rawOwnerName;
+
+  console.log("[AvailabilityPageWrapper] ✅ Processed ownerEmail:", ownerEmail);
+  console.log("[AvailabilityPageWrapper] ✅ Processed ownerName:", ownerName);
+
+  // Get current user's first availability for mutual availability feature
+  const currentUserAvailability = backendAvailabilities[0]
+    ? {
+        id: backendAvailabilities[0].id,
+        name: backendAvailabilities[0].title,
+        slots: backendAvailabilities[0].slots || [],
+      }
+    : undefined;
+
   return (
     <AvailabilityPage
+      availabilityId={id}
       availabilityName={availability.name}
       currentStartDate={availability.currentStartDate}
       onPreviousWeek={handlePreviousWeek}
@@ -659,6 +865,11 @@ const AvailabilityPageWrapper = memo(function AvailabilityPageWrapper({
       onToday={handleToday}
       isCurrentWeek={isCurrentWeekValue}
       isMobile={isMobile}
+      availabilitySlots={slots}
+      ownerEmail={ownerEmail}
+      ownerName={ownerName}
+      isViewingOthers={isViewingOthers}
+      currentUserAvailability={currentUserAvailability}
     />
   );
 });
@@ -704,7 +915,7 @@ export default function App() {
       <BrowserRouter>
         <Toaster />
         <AppContent />
-        {import.meta.env.VITE_DFX_NETWORK =="local" && <DiagnosticPanel />}
+        {import.meta.env.VITE_DFX_NETWORK == "local" && <DiagnosticPanel />}
       </BrowserRouter>
     </ErrorBoundary>
   );

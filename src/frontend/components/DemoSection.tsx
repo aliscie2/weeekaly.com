@@ -55,8 +55,7 @@ export function DemoSection() {
           >
             <div className="bg-[#8b8475]/10 border border-[#d4cfbe]/40 rounded-xl md:rounded-2xl rounded-tr-sm px-3 md:px-4 py-2 md:py-3 max-w-[85%] md:max-w-[80%]">
               <p className="text-xs md:text-sm text-[#8b8475]">
-                I use my availabilities every day from 9 AM to 6 PM except
-                Fridays
+                I am availabile every day from 9 AM to 6 PM except Fridays
               </p>
             </div>
             <div className="shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-full bg-[#8b8475]/20 flex items-center justify-center">
@@ -168,8 +167,8 @@ export function DemoSection() {
           >
             <div className="bg-[#8b8475]/10 border border-[#d4cfbe]/40 rounded-xl md:rounded-2xl rounded-tr-sm px-3 md:px-4 py-2 md:py-3 max-w-[85%] md:max-w-[80%]">
               <p className="text-xs md:text-sm text-[#8b8475]">
-                Find me a good time to meet my three friends with all of their
-                different time zones
+                Alex live in USA 🇺🇸, Madae live in Bali 🇮🇩, and I live Dubai 🇦🇪
+                for all our timezones, which is the best time to meet?
               </p>
             </div>
             <div className="shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-full bg-[#8b8475]/20 flex items-center justify-center">
@@ -226,7 +225,7 @@ export function DemoSection() {
                     ✨ Best time: Tomorrow evening at 5:00 PM
                   </motion.p>
                   <p className="text-[10px] md:text-xs text-green-600/80 mt-1">
-                    Works for all 4 participants
+                    Works for all 3 of you.
                   </p>
                 </motion.div>
               </motion.div>

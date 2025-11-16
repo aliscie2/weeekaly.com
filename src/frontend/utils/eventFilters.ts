@@ -5,7 +5,7 @@
 
 export type FilterScope = "all" | "today" | "tomorrow" | "week" | "month";
 
-export interface EventLike {
+interface EventLike {
   id?: string;
   start?: { dateTime?: string } | string;
   end?: { dateTime?: string } | string;
@@ -94,32 +94,35 @@ export function filterEventsByScope(
   }
 }
 
-/**
- * Get scope label for display
- */
-export function getScopeLabel(scope: FilterScope): string {
-  const labels: Record<FilterScope, string> = {
-    all: "total",
-    today: "today",
-    tomorrow: "tomorrow",
-    week: "this week",
-    month: "this month",
-  };
-  return labels[scope];
-}
+// Utility functions kept for potential future use
+// Uncomment if needed:
 
-/**
- * Parse scope from message text
- */
-export function parseScopeFromMessage(message: string): FilterScope {
-  const lowerMsg = message.toLowerCase();
+// /**
+//  * Get scope label for display
+//  */
+// export function getScopeLabel(scope: FilterScope): string {
+//   const labels: Record<FilterScope, string> = {
+//     all: "total",
+//     today: "today",
+//     tomorrow: "tomorrow",
+//     week: "this week",
+//     month: "this month",
+//   };
+//   return labels[scope];
+// }
 
-  if (lowerMsg.includes("today")) return "today";
-  if (lowerMsg.includes("tomorrow")) return "tomorrow";
-  if (lowerMsg.includes("this week") || lowerMsg.includes("week"))
-    return "week";
-  if (lowerMsg.includes("this month") || lowerMsg.includes("month"))
-    return "month";
+// /**
+//  * Parse scope from message text
+//  */
+// export function parseScopeFromMessage(message: string): FilterScope {
+//   const lowerMsg = message.toLowerCase();
 
-  return "all";
-}
+//   if (lowerMsg.includes("today")) return "today";
+//   if (lowerMsg.includes("tomorrow")) return "tomorrow";
+//   if (lowerMsg.includes("this week") || lowerMsg.includes("week"))
+//     return "week";
+//   if (lowerMsg.includes("this month") || lowerMsg.includes("month"))
+//     return "month";
+
+//   return "all";
+// }

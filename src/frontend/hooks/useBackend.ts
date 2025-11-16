@@ -316,6 +316,7 @@ export function useUpdateEvent() {
         location?: string;
         status?: "confirmed" | "tentative" | "cancelled";
         conferenceData?: boolean;
+        attendeeResponse?: "accepted" | "declined" | "tentative";
       };
     }) => {
       // Check if user is authenticated
@@ -373,6 +374,39 @@ export function useUpdateEvent() {
       }
       if (params.updates.status !== undefined) {
         updates.status = params.updates.status;
+      }
+
+      // Handle attendee response (accept/decline invitation)
+      if (params.updates.attendeeResponse !== undefined) {
+        // First, get the current event to find the current user's attendee entry
+        const getResponse = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events/${params.eventId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          },
+        );
+
+        if (!getResponse.ok) {
+          throw new Error("Failed to fetch event for response update");
+        }
+
+        const currentEvent = await getResponse.json();
+        const currentAttendees = currentEvent.attendees || [];
+
+        // Update the current user's response status
+        updates.attendees = currentAttendees.map(
+          (attendee: GoogleCalendarAttendee) => {
+            if (attendee.self) {
+              return {
+                ...attendee,
+                responseStatus: params.updates.attendeeResponse,
+              };
+            }
+            return attendee;
+          },
+        );
       }
 
       // Update event via Google Calendar API
@@ -467,6 +501,138 @@ export function useUpdateEvent() {
 }
 
 /**
+ * Hook to fetch calendar events from a shared calendar
+ * This allows viewing events from another person's calendar if they've shared it
+ *
+ * @param calendarId - The calendar ID (usually an email address) or 'primary' for own calendar
+ * @param enabled - Whether to enable the query
+ */
+export function useSharedCalendarEvents(
+  calendarId: string | undefined,
+  enabled: boolean = true,
+) {
+  return useQuery({
+    queryKey: ["shared-calendar-events", calendarId],
+    queryFn: async (): Promise<GoogleCalendarEvent[]> => {
+      try {
+        if (!calendarId) {
+          console.log("[useSharedCalendarEvents] ⚠️ No calendar ID provided");
+          return [];
+        }
+
+        // Get a valid access token (will refresh if expired)
+        const accessToken = await getValidAccessToken();
+        if (!accessToken) {
+          console.log("[useSharedCalendarEvents] ⚠️ No access token available");
+          return [];
+        }
+
+        // Fetch events from the past 30 days to 90 days in the future
+        const timeMin = new Date();
+        timeMin.setDate(timeMin.getDate() - 30);
+        const timeMax = new Date();
+        timeMax.setDate(timeMax.getDate() + 90);
+
+        const url = new URL(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+        );
+        url.searchParams.append("timeMin", timeMin.toISOString());
+        url.searchParams.append("timeMax", timeMax.toISOString());
+        url.searchParams.append("singleEvents", "true");
+        url.searchParams.append("orderBy", "startTime");
+        url.searchParams.append("maxResults", "250");
+
+        console.log(
+          `[useSharedCalendarEvents] 🔍 Fetching events from calendar: ${calendarId}`,
+        );
+
+        const response = await fetch(url.toString(), {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          console.error(
+            `[useSharedCalendarEvents] ❌ API error: ${response.status}`,
+          );
+
+          // If token is invalid, clear all tokens
+          if (response.status === 401) {
+            clearTokens();
+          }
+
+          // Log the error details
+          const errorText = await response.text();
+          console.error(
+            `[useSharedCalendarEvents] ❌ Error details:`,
+            errorText,
+          );
+
+          throw new Error(`Google Calendar API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const allEvents = data.items || [];
+
+        // Filter out events that start before now
+        const now = new Date();
+        const events = allEvents.filter((event: any) => {
+          const startTime = event.start?.dateTime || event.start?.date;
+          if (!startTime) return false;
+
+          const eventStart = new Date(startTime);
+          return eventStart >= now;
+        });
+
+        console.log(
+          `[useSharedCalendarEvents] ✅ Fetched ${events.length} future events from ${calendarId} (filtered from ${allEvents.length} total)`,
+        );
+        console.log(`[useSharedCalendarEvents] 📅 Events:`, events);
+
+        return events;
+      } catch (error) {
+        console.error(
+          "[useSharedCalendarEvents] ❌ Error:",
+          error instanceof Error ? error.message : String(error),
+        );
+        // Return empty array on error instead of throwing
+        return [];
+      }
+    },
+    enabled: enabled && !!calendarId,
+    refetchInterval: false,
+    staleTime: 10 * 60 * 1000, // Consider data fresh for 10 minutes
+    gcTime: 15 * 60 * 1000, // Keep in cache for 15 minutes
+    retry: 1,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+  });
+}
+
+/**
+ * Hook to set an availability as favorite
+ */
+export function useSetFavoriteAvailability() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (availabilityId: string) => {
+      const result =
+        await backendActor.set_favorite_availability(availabilityId);
+      if ("Err" in result) {
+        throw new Error(result.Err);
+      }
+      return result.Ok;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["availabilities"] });
+    },
+  });
+}
+
+/**
  * Hook to delete a calendar event
  * Optimized with optimistic updates for instant UI feedback
  */
@@ -521,5 +687,55 @@ export function useDeleteEvent() {
       // Refetch to ensure consistency
       queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
     },
+  });
+}
+
+/**
+ * Hook to fetch user availabilities from backend
+ * Uses React Query for caching and automatic refetching
+ */
+export function useAvailabilities(enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["availabilities"],
+    queryFn: async () => {
+      const availsList = await backendActor.list_user_availabilities();
+      return availsList;
+    },
+    enabled: enabled,
+    staleTime: 2 * 60 * 1000, // Consider fresh for 2 minutes
+    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
+  });
+}
+
+/**
+ * Hook to fetch a specific availability by ID (public access)
+ * This allows viewing someone else's availability
+ */
+export function useAvailabilityById(
+  id: string | undefined,
+  enabled: boolean = true,
+) {
+  return useQuery({
+    queryKey: ["availability", id],
+    queryFn: async () => {
+      if (!id) {
+        throw new Error("Availability ID is required");
+      }
+
+      const result = await backendActor.get_availability(id);
+
+      if ("Err" in result) {
+        throw new Error(result.Err);
+      }
+
+      // Log raw result from backend BEFORE any processing
+      console.log("[useAvailabilityById] 🔍 RAW backend response:", result.Ok);
+
+      return result.Ok;
+    },
+    enabled: enabled && !!id,
+    staleTime: 5 * 60 * 1000, // Consider fresh for 5 minutes
+    gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
+    retry: 1, // Only retry once for 404s
   });
 }

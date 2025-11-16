@@ -1,8 +1,20 @@
 use ic_cdk_macros::{query, update, init};
-use candid::{CandidType, Principal};
+use candid::{CandidType, Principal, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use ic_stable_structures::{
+    memory_manager::MemoryId,
+    storable::Bound,
+    StableBTreeMap, Storable,
+};
+use std::borrow::Cow;
+
+mod memory;
+mod availabilities;
+use availabilities::*;
+pub use availabilities::BusyTimeBlock;
+use memory::{Memory, MEMORY_MANAGER};
 
 // ============================================================================
 // Constants
@@ -112,14 +124,35 @@ pub struct RefreshTokenRequest {
 }
 
 // ============================================================================
+// Storable Implementations
+// ============================================================================
+
+impl Storable for TokenResponse {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(Encode!(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        Decode!(bytes.as_ref(), Self).unwrap()
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+// ============================================================================
 // State
 // ============================================================================
 
 thread_local! {
     static PROVIDERS: RefCell<HashMap<String, OAuthProvider>> = RefCell::new(HashMap::new());
     static SESSIONS: RefCell<HashMap<Vec<u8>, SessionData>> = RefCell::new(HashMap::new());
-    // Store encrypted tokens per user (user_id -> TokenResponse)
-    static USER_TOKENS: RefCell<HashMap<String, TokenResponse>> = RefCell::new(HashMap::new());
+    
+    // Store encrypted tokens per user (user_id -> TokenResponse) - STABLE STORAGE
+    pub static USER_TOKENS: RefCell<StableBTreeMap<String, TokenResponse, Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2)))
+        )
+    );
 }
 
 // ============================================================================
@@ -228,21 +261,29 @@ async fn prepare_delegation(req: PrepareDelegationRequest) -> Result<PrepareDele
     // 2. Verify JWT token and extract user ID, email, and name
     let (user_id, email, name) = verify_jwt_token(&req.id_token)?;
     
+    ic_cdk::println!("📧 [prepare_delegation] JWT extracted - user_id={}, email={:?}, name={:?}", user_id, email, name);
+    
     // 3. Calculate expiration
     let now = ic_cdk::api::time();
     let expire_at = now + req.max_time_to_live;
     
+    // Derive the principal for this user
+    let user_principal = derive_user_principal(&user_id, &req.origin);
+    ic_cdk::println!("🔑 [prepare_delegation] Derived principal: {:?}", user_principal);
+    
     // 4. Store session
     SESSIONS.with(|s| {
         s.borrow_mut().insert(req.session_public_key.clone(), SessionData {
-            user_id,
-            email,
-            name,
-            origin: req.origin,
+            user_id: user_id.clone(),
+            email: email.clone(),
+            name: name.clone(),
+            origin: req.origin.clone(),
             expires_at: expire_at,
-            targets: req.targets,
+            targets: req.targets.clone(),
         });
     });
+    
+    ic_cdk::println!("✅ [prepare_delegation] Session stored for principal {:?}", user_principal);
     
     Ok(PrepareDelegationResponse { expire_at })
 }
@@ -390,11 +431,34 @@ async fn exchange_oauth_code(req: ExchangeCodeRequest) -> Result<TokenResponse, 
             
             ic_cdk::println!("✅ [Backend] Token exchange successful!");
             
-            // Store tokens for this user (associated with their session)
-            // In production, encrypt tokens before storing
+            // Store tokens for this user
+            // We need to extract the user_id from the id_token to get the OAuth principal
+            // For now, store using caller (frontend principal)
             let caller = ic_cdk::caller().to_text();
+            
+            // Also try to find the OAuth principal from active sessions
+            // by matching the user who just authenticated
+            let oauth_principals: Vec<String> = SESSIONS.with(|s| {
+                s.borrow()
+                    .iter()
+                    .map(|(_, session)| {
+                        derive_user_principal(&session.user_id, &session.origin).to_text()
+                    })
+                    .collect()
+            });
+            
+            ic_cdk::println!("💾 [Backend] Storing tokens for caller: {}", caller);
+            ic_cdk::println!("💾 [Backend] Also storing for {} OAuth principals", oauth_principals.len());
+            
             USER_TOKENS.with(|t| {
-                t.borrow_mut().insert(caller, token_response.clone());
+                let mut tokens = t.borrow_mut();
+                // Store for caller
+                tokens.insert(caller.clone(), token_response.clone());
+                // Store for all OAuth principals (in case one of them is the owner)
+                for principal in oauth_principals {
+                    ic_cdk::println!("💾 [Backend] Storing token for OAuth principal: {}", principal);
+                    tokens.insert(principal, token_response.clone());
+                }
             });
             
             Ok(token_response)
@@ -449,10 +513,24 @@ async fn refresh_google_token(req: RefreshTokenRequest) -> Result<TokenResponse,
             
             ic_cdk::println!("✅ [Backend] Token refresh successful!");
             
-            // Update stored tokens
+            // Update stored tokens for all principals
             let caller = ic_cdk::caller().to_text();
+            
+            let oauth_principals: Vec<String> = SESSIONS.with(|s| {
+                s.borrow()
+                    .iter()
+                    .map(|(_, session)| {
+                        derive_user_principal(&session.user_id, &session.origin).to_text()
+                    })
+                    .collect()
+            });
+            
             USER_TOKENS.with(|t| {
-                t.borrow_mut().insert(caller, token_response.clone());
+                let mut tokens = t.borrow_mut();
+                tokens.insert(caller, token_response.clone());
+                for principal in oauth_principals {
+                    tokens.insert(principal, token_response.clone());
+                }
             });
             
             Ok(token_response)
@@ -851,5 +929,311 @@ fn derive_user_pubkey(user_id: &str, origin: &str) -> Vec<u8> {
     hasher.update(origin.as_bytes());
     hasher.finalize().to_vec()
 }
+
+/// Derive deterministic user principal from user ID and origin
+fn derive_user_principal(user_id: &str, origin: &str) -> Principal {
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(user_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(origin.as_bytes());
+    let hash = hasher.finalize();
+    Principal::from_slice(&hash[0..29])
+}
+
+// ============================================================================
+// Availability API Endpoints
+// ============================================================================
+
+/// Helper function to fetch busy times for an availability
+async fn fetch_busy_times_for_availability(availability: &Availability) -> Result<Vec<BusyTimeBlock>, String> {
+    ic_cdk::println!("🔍 [fetch_busy_times] Starting for owner: {}", availability.owner.to_text());
+    
+    // 1. Get owner's access token
+    let owner_id = availability.owner.to_text();
+    let token = USER_TOKENS.with(|t| {
+        t.borrow().get(&owner_id).map(|tr| tr.access_token.clone())
+    }).ok_or_else(|| {
+        ic_cdk::println!("❌ [fetch_busy_times] Owner not authenticated: {}", owner_id);
+        "Owner not authenticated".to_string()
+    })?;
+    
+    ic_cdk::println!("✅ [fetch_busy_times] Found access token for owner");
+    
+    // 2. Calculate time range (next 90 days)
+    let now = ic_cdk::api::time() / 1_000_000_000; // Convert to seconds
+    let end_time = now + (90 * 24 * 60 * 60); // 90 days from now
+    
+    ic_cdk::println!("📅 [fetch_busy_times] Time range: {} to {}", now, end_time);
+    
+    // 3. Fetch events from Google Calendar
+    let events = fetch_calendar_events(&token, now, end_time).await?;
+    
+    ic_cdk::println!("📋 [fetch_busy_times] Fetched {} events from Google Calendar", events.len());
+    
+    // 4. Extract only start/end times
+    let busy_times: Vec<BusyTimeBlock> = events
+        .into_iter()
+        .filter_map(|event| {
+            let start_str = event.get("start")?.get("dateTime")?.as_str()?;
+            let end_str = event.get("end")?.get("dateTime")?.as_str()?;
+            
+            let start_time = parse_iso8601_to_timestamp(start_str)?;
+            let end_time = parse_iso8601_to_timestamp(end_str)?;
+            
+            Some(BusyTimeBlock {
+                start_time,
+                end_time,
+            })
+        })
+        .collect();
+    
+    ic_cdk::println!("✅ [fetch_busy_times] Extracted {} busy time blocks", busy_times.len());
+    
+    Ok(busy_times)
+}
+
+/// Fetch calendar events from Google Calendar API
+async fn fetch_calendar_events(
+    access_token: &str,
+    time_min: u64,
+    time_max: u64,
+) -> Result<Vec<serde_json::Value>, String> {
+    // Convert timestamps to ISO 8601 format
+    let time_min_iso = format_timestamp_to_iso8601(time_min);
+    let time_max_iso = format_timestamp_to_iso8601(time_max);
+    
+    let url = format!(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin={}&timeMax={}&singleEvents=true&orderBy=startTime&maxResults=250",
+        urlencoding::encode(&time_min_iso),
+        urlencoding::encode(&time_max_iso)
+    );
+    
+    let request = ic_cdk::api::management_canister::http_request::CanisterHttpRequestArgument {
+        url,
+        method: ic_cdk::api::management_canister::http_request::HttpMethod::GET,
+        body: None,
+        max_response_bytes: Some(1_000_000), // 1MB for event list
+        transform: None,
+        headers: vec![
+            ic_cdk::api::management_canister::http_request::HttpHeader {
+                name: "Authorization".to_string(),
+                value: format!("Bearer {}", access_token),
+            },
+        ],
+    };
+    
+    match ic_cdk::api::management_canister::http_request::http_request(request, 25_000_000_000).await {
+        Ok((response,)) => {
+            if response.status != candid::Nat::from(200u8) {
+                let error_body = String::from_utf8_lossy(&response.body);
+                return Err(format!("Failed to fetch calendar events: {}", error_body));
+            }
+            
+            let response_json: serde_json::Value = serde_json::from_slice(&response.body)
+                .map_err(|e| format!("Failed to parse calendar response: {}", e))?;
+            
+            let events = response_json["items"]
+                .as_array()
+                .ok_or("No items in calendar response")?
+                .clone();
+            
+            Ok(events)
+        }
+        Err((code, msg)) => {
+            Err(format!("HTTP request failed: {:?} - {}", code, msg))
+        }
+    }
+}
+
+/// Parse ISO 8601 timestamp to Unix timestamp (seconds)
+fn parse_iso8601_to_timestamp(iso_str: &str) -> Option<u64> {
+    // Simple parser for ISO 8601 format: 2024-01-15T10:00:00Z or 2024-01-15T10:00:00-08:00
+    // Extract year, month, day, hour, minute, second
+    let parts: Vec<&str> = iso_str.split('T').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    
+    let date_parts: Vec<&str> = parts[0].split('-').collect();
+    if date_parts.len() != 3 {
+        return None;
+    }
+    
+    let year: i32 = date_parts[0].parse().ok()?;
+    let month: u32 = date_parts[1].parse().ok()?;
+    let day: u32 = date_parts[2].parse().ok()?;
+    
+    // Parse time part (remove timezone info for simplicity)
+    let time_part = parts[1].split('+').next()?.split('-').next()?.split('Z').next()?;
+    let time_parts: Vec<&str> = time_part.split(':').collect();
+    if time_parts.len() < 2 {
+        return None;
+    }
+    
+    let hour: u32 = time_parts[0].parse().ok()?;
+    let minute: u32 = time_parts[1].parse().ok()?;
+    let second: u32 = if time_parts.len() > 2 {
+        time_parts[2].split('.').next()?.parse().ok()?
+    } else {
+        0
+    };
+    
+    // Calculate Unix timestamp (simplified - doesn't account for all edge cases)
+    // Days since Unix epoch (1970-01-01)
+    let days_since_epoch = days_from_civil(year, month, day);
+    let seconds_from_days = days_since_epoch * 86400;
+    let seconds_from_time = (hour * 3600 + minute * 60 + second) as i64;
+    
+    Some((seconds_from_days + seconds_from_time) as u64)
+}
+
+/// Calculate days since Unix epoch (1970-01-01)
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let y = year as i64 - (if month <= 2 { 1 } else { 0 });
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = (y - era * 400) as u32;
+    let month_adjusted = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * month_adjusted + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe as i64 - 719468
+}
+
+/// Format Unix timestamp (seconds) to ISO 8601
+fn format_timestamp_to_iso8601(timestamp: u64) -> String {
+    // Convert to days and seconds
+    let days = (timestamp / 86400) as i64;
+    let seconds_in_day = timestamp % 86400;
+    
+    // Calculate date from days since epoch
+    let (year, month, day) = civil_from_days(days);
+    
+    // Calculate time
+    let hour = seconds_in_day / 3600;
+    let minute = (seconds_in_day % 3600) / 60;
+    let second = seconds_in_day % 60;
+    
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hour, minute, second
+    )
+}
+
+/// Calculate civil date from days since Unix epoch
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719468;
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = (y + if m <= 2 { 1 } else { 0 }) as i32;
+    (year, m, d)
+}
+
+#[update]
+fn create_availability(req: CreateAvailabilityRequest) -> Result<Availability, String> {
+    let caller = ic_cdk::caller();
+    let result = availabilities::create_availability(caller, req)?;
+    
+    // Copy token from caller to the availability owner (they're the same user)
+    // This ensures the owner principal has the token for fetching busy times
+    let caller_str = caller.to_text();
+    let owner_str = result.owner.to_text();
+    
+    if caller_str != owner_str {
+        ic_cdk::println!("🔑 [create_availability] Copying token from {} to {}", caller_str, owner_str);
+        USER_TOKENS.with(|t| {
+            let tokens = t.borrow();
+            if let Some(token) = tokens.get(&caller_str) {
+                drop(tokens); // Release borrow before mutable borrow
+                t.borrow_mut().insert(owner_str, token);
+                ic_cdk::println!("✅ [create_availability] Token copied successfully");
+            } else {
+                ic_cdk::println!("⚠️ [create_availability] No token found for caller");
+            }
+        });
+    }
+    
+    Ok(result)
+}
+
+#[query]
+fn get_availability(id: String) -> Result<Availability, String> {
+    ic_cdk::println!("🔍 [get_availability] Called for ID: {}", id);
+    let availability = availabilities::get_availability(id)?;
+    
+    ic_cdk::println!("📋 [get_availability] Found availability, owner: {}", availability.owner.to_text());
+    ic_cdk::println!("🎯 [get_availability] Returning availability with busy_times: {:?}", 
+        availability.busy_times.as_ref().map(|bt| bt.len()));
+    
+    Ok(availability)
+}
+
+#[update]
+fn update_availability(req: UpdateAvailabilityRequest) -> Result<Availability, String> {
+    let caller = ic_cdk::caller();
+    availabilities::update_availability(caller, req)
+}
+
+#[update]
+fn update_availability_busy_times(id: String, busy_times: Vec<BusyTimeBlock>) -> Result<(), String> {
+    let caller = ic_cdk::caller();
+    availabilities::update_availability_busy_times(caller, id, busy_times)
+}
+
+#[update]
+fn delete_availability(id: String) -> Result<(), String> {
+    let caller = ic_cdk::caller();
+    availabilities::delete_availability(caller, id)
+}
+
+#[query]
+fn list_user_availabilities() -> Vec<Availability> {
+    let caller = ic_cdk::caller();
+    availabilities::list_user_availabilities(caller)
+}
+
+#[update]
+fn regenerate_availability_id(old_id: String) -> Result<String, String> {
+    let caller = ic_cdk::caller();
+    availabilities::regenerate_availability_id(caller, old_id)
+}
+
+#[query]
+fn search_availabilities_by_email(email: String) -> Vec<Availability> {
+    availabilities::search_availabilities_by_email(email)
+}
+
+#[query]
+fn search_availabilities_by_username(username: String) -> Vec<Availability> {
+    availabilities::search_availabilities_by_username(username)
+}
+
+#[query]
+fn search_availabilities_by_principal(principal: Principal) -> Vec<Availability> {
+    availabilities::search_availabilities_by_principal(principal)
+}
+
+#[query]
+fn search_by_emails(emails: Vec<String>) -> Vec<Vec<Availability>> {
+    availabilities::search_by_emails(emails)
+}
+
+#[query]
+fn search_by_usernames(usernames: Vec<String>) -> Vec<Vec<Availability>> {
+    availabilities::search_by_usernames(usernames)
+}
+
+#[update]
+fn set_favorite_availability(id: String) -> Result<(), String> {
+    let caller = ic_cdk::caller();
+    availabilities::set_favorite_availability(caller, id)
+}
+
+
 
 ic_cdk_macros::export_candid!();

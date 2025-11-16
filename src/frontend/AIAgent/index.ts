@@ -6,6 +6,7 @@ type CalendarActionType =
   | "ADD_EVENT"
   | "UPDATE_EVENT"
   | "DELETE_EVENT"
+  | "ADD_AVAILABILITY"
   | "SET_AVAILABILITY"
   | "UPDATE_AVAILABILITY"
   | "DELETE_AVAILABILITY"
@@ -15,7 +16,8 @@ type CalendarActionType =
   | "SUGGEST_ALTERNATIVES"
   | "SUGGEST_TIMES"
   | "QUERY"
-  | "BULK_DELETE_CONFIRMATION";
+  | "BULK_DELETE_CONFIRMATION"
+  | "CASUAL";
 
 export interface CalendarAction {
   type: CalendarActionType;

@@ -2,6 +2,7 @@ import { HttpAgent, Actor, ActorSubclass } from "@dfinity/agent";
 import { Identity } from "@dfinity/agent";
 import { idlFactory } from "../../declarations/backend/backend.did.js";
 import type { _SERVICE } from "../../declarations/backend/backend.did.d.ts";
+import { createBackendCaster } from "./backendCaster";
 
 const canisterId =
   process.env.CANISTER_ID_BACKEND || "bkyz2-fmaaa-aaaaa-qaaaq-cai";
@@ -24,14 +25,14 @@ if (process.env.DFX_NETWORK !== "ic") {
   });
 }
 
-// Create initial actor with anonymous identity
-export let backendActor: ActorSubclass<_SERVICE> = Actor.createActor(
-  idlFactory,
-  {
-    agent,
-    canisterId,
-  },
-);
+// Create initial actor with anonymous identity and apply backendCaster
+const rawActor = Actor.createActor(idlFactory, {
+  agent,
+  canisterId,
+});
+export let backendActor = createBackendCaster(
+  rawActor,
+) as ActorSubclass<_SERVICE>;
 
 /**
  * Update the backend actor with an authenticated identity
@@ -62,9 +63,10 @@ export function setAuthenticatedActor(identity: Identity) {
     });
   }
 
-  // Create new actor with authenticated agent
-  backendActor = Actor.createActor(idlFactory, {
+  // Create new actor with authenticated agent and apply backendCaster
+  const rawActor = Actor.createActor(idlFactory, {
     agent,
     canisterId,
   });
+  backendActor = createBackendCaster(rawActor) as ActorSubclass<_SERVICE>;
 }

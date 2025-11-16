@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router-dom";
 import { ChatMessage } from "../components/ChatMessage";
@@ -7,9 +7,10 @@ import {
   Calendar,
   User,
   CalendarDays,
-  Share2,
   Expand,
   Trash2,
+  Link as LinkIcon,
+  Star,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -23,9 +24,14 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { AUTH_CONSTANTS } from "../utils/authConstants";
 import { useAIAgent } from "../hooks/useAIAgent";
-import { useCalendarEvents } from "../hooks/useBackend";
+import {
+  useCalendarEvents,
+  useAvailabilities,
+  useSetFavoriteAvailability,
+} from "../hooks/useBackend";
 import { EventFormModal } from "../components/EventFormModal";
 import { startOfDay, endOfDay } from "date-fns";
+import { toast } from "sonner";
 
 // Define EventCardData locally since it's not exported from ChatMessage
 type EventCardData = {
@@ -66,7 +72,6 @@ interface Availability {
 interface ContactPageProps {
   availabilities: Availability[];
   isMobile: boolean;
-  onShareAvailability: (id: string) => void;
   onDeleteAvailability: (id: string) => void;
   getTodayEventCount: () => number;
   newEventCount: number;
@@ -76,29 +81,82 @@ const WELCOME_MESSAGE =
   "Hi! I can help you manage your calendar. Try: 'Meeting tomorrow at 3pm' or 'Delete the team meeting'.";
 
 // Helper functions
-const getDaysData = (startDate: Date, count: number): DayAvailability[] => {
+const convertBackendSlotsToUI = (
+  backendSlots: Array<{
+    day_of_week: number;
+    start_time: number;
+    end_time: number;
+  }>,
+): Map<number, TimeSlot[]> => {
+  const slotsByDay = new Map<number, TimeSlot[]>();
+
+  console.log("═══════════════════════════════════════════════════");
+  console.log("🔄 CONVERTING BACKEND SLOTS TO UI:");
+  console.log("Input slots:", JSON.stringify(backendSlots, null, 2));
+
+  for (const slot of backendSlots) {
+    const startHours = Math.floor(slot.start_time / 60);
+    const startMinutes = slot.start_time % 60;
+    const endHours = Math.floor(slot.end_time / 60);
+    const endMinutes = slot.end_time % 60;
+
+    console.log(`Day ${slot.day_of_week}:`);
+    console.log(
+      `  start_time: ${slot.start_time} → ${startHours}:${startMinutes}`,
+    );
+    console.log(`  end_time: ${slot.end_time} → ${endHours}:${endMinutes}`);
+
+    const formatTime = (hours: number, minutes: number): string => {
+      const period = hours >= 12 ? "PM" : "AM";
+      const displayHours = hours % 12 || 12;
+      const displayMinutes = minutes.toString().padStart(2, "0");
+      const result = `${displayHours}:${displayMinutes} ${period}`;
+      console.log(`    formatTime(${hours}, ${minutes}) → "${result}"`);
+      return result;
+    };
+
+    const timeSlot: TimeSlot = {
+      start: formatTime(startHours, startMinutes),
+      end: formatTime(endHours, endMinutes),
+    };
+
+    console.log(`  Result: ${timeSlot.start} - ${timeSlot.end}`);
+
+    if (!slotsByDay.has(slot.day_of_week)) {
+      slotsByDay.set(slot.day_of_week, []);
+    }
+    slotsByDay.get(slot.day_of_week)!.push(timeSlot);
+  }
+
+  console.log("═══════════════════════════════════════════════════");
+
+  return slotsByDay;
+};
+
+const getDaysDataFromBackend = (
+  startDate: Date,
+  count: number,
+  backendSlots: Array<{
+    day_of_week: number;
+    start_time: number;
+    end_time: number;
+  }>,
+): DayAvailability[] => {
   const days: DayAvailability[] = [];
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const slotsByDay = convertBackendSlotsToUI(backendSlots);
 
   for (let i = 0; i < count; i++) {
     const date = new Date(startDate);
     date.setDate(startDate.getDate() + i);
     const dayOfWeek = date.getDay();
-    const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
 
-    let timeSlots: TimeSlot[] = [];
-    if (isWeekday) {
-      if (dayOfWeek === 2) {
-        timeSlots = [{ start: "9:00 AM", end: "3:00 PM" }];
-      } else {
-        timeSlots = [{ start: "9:00 AM", end: "6:00 PM" }];
-      }
-    }
+    const timeSlots = slotsByDay.get(dayOfWeek) || [];
 
     days.push({
       date: new Date(date),
       dayName: dayNames[dayOfWeek],
-      available: isWeekday,
+      available: timeSlots.length > 0,
       timeSlots: timeSlots,
     });
   }
@@ -111,6 +169,39 @@ const getStartOfWeek = (date: Date): Date => {
   const day = d.getDay();
   const diff = d.getDate() - day;
   return new Date(d.setDate(diff));
+};
+
+const copyAvailabilityLink = async (availabilityId: string) => {
+  const baseUrl = window.location.origin;
+  const link = `${baseUrl}/availability/${availabilityId}`;
+
+  try {
+    // Try modern Clipboard API first
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(link);
+      toast.success("Availability link copied!");
+    } else {
+      // Fallback for older browsers
+      const textarea = document.createElement("textarea");
+      textarea.value = link;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+
+      const successful = document.execCommand("copy");
+      document.body.removeChild(textarea);
+
+      if (successful) {
+        toast.success("Availability link copied!");
+      } else {
+        throw new Error("Copy command failed");
+      }
+    }
+  } catch (err) {
+    console.error("Failed to copy:", err);
+    toast.error("Failed to copy link");
+  }
 };
 
 const parseTimeToHours = (timeString: string): number => {
@@ -145,7 +236,6 @@ const getProportionalHeight = (
 export function ContactPage({
   availabilities,
   isMobile,
-  onShareAvailability,
   onDeleteAvailability,
   getTodayEventCount,
   newEventCount,
@@ -155,17 +245,38 @@ export function ContactPage({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [currentSuggestions, setCurrentSuggestions] = useState<string[]>([]);
+  const [selectedAvailabilityId, setSelectedAvailabilityId] = useState<
+    string | null
+  >(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
 
   // Get calendar events
   const { data: calendarEvents = [] } = useCalendarEvents();
 
+  // Get full backend availabilities with slots
+  const { data: backendAvailabilities = [] } = useAvailabilities(true);
+
+  // Sort availabilities by display_order
+  const sortedAvailabilities = useMemo(() => {
+    return [...availabilities].sort((a, b) => {
+      const aBackend = backendAvailabilities.find((ba: any) => ba.id === a.id);
+      const bBackend = backendAvailabilities.find((bb: any) => bb.id === b.id);
+      const aOrder = aBackend?.display_order ?? 999;
+      const bOrder = bBackend?.display_order ?? 999;
+      return aOrder - bOrder;
+    });
+  }, [availabilities, backendAvailabilities]);
+
+  // Set favorite availability mutation
+  const setFavoriteAvailability = useSetFavoriteAvailability();
+
   // AI Agent integration
   const { processMessage, isProcessing, eventActions } = useAIAgent(
     calendarEvents,
     availabilities,
     messages,
+    selectedAvailabilityId,
   );
 
   // Get Google user avatar from localStorage
@@ -349,34 +460,90 @@ export function ContactPage({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="w-80 bg-[#f5f3ef] border-[#d4cfbe]/40">
-                  {availabilities.map((availability) => {
+                  {sortedAvailabilities.map((availability) => {
                     const startDate = isMobile
                       ? availability.currentStartDate
                       : getStartOfWeek(availability.currentStartDate);
-                    const availabilityWeekData = getDaysData(startDate, 7);
+
+                    // Find the backend availability data with slots
+                    const backendAvail = backendAvailabilities.find(
+                      (a: any) => a.id === availability.id,
+                    );
+                    const backendSlots = backendAvail?.slots || [];
+
+                    const availabilityWeekData = getDaysDataFromBackend(
+                      startDate,
+                      7,
+                      backendSlots,
+                    );
 
                     return (
                       <DropdownMenuItem
                         key={availability.id}
-                        className="flex flex-col gap-2 p-3 cursor-pointer hover:bg-[#e8e4d9]/60 focus:bg-[#e8e4d9]/60"
+                        className={`flex flex-col gap-2 p-3 cursor-pointer hover:bg-[#e8e4d9]/60 focus:bg-[#e8e4d9]/60 ${
+                          selectedAvailabilityId === availability.id
+                            ? "bg-[#8b8475]/10 border-l-2 border-[#8b8475]"
+                            : ""
+                        }`}
                         onSelect={(e) => e.preventDefault()}
+                        onClick={() =>
+                          setSelectedAvailabilityId(availability.id)
+                        }
                       >
                         <div className="flex items-center justify-between gap-2 w-full">
-                          <span className="text-[#8b8475] flex-1 truncate">
+                          <span
+                            className={`flex-1 truncate ${
+                              selectedAvailabilityId === availability.id
+                                ? "text-[#8b8475] font-medium"
+                                : "text-[#8b8475]"
+                            }`}
+                          >
                             {availability.name}
                           </span>
                           <div className="flex items-center gap-1 shrink-0">
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-7 w-7 text-[#a8a195] hover:text-[#8b8475] hover:bg-[#d4cfbe]/40"
+                              className={`h-7 w-7 ${
+                                backendAvailabilities.find(
+                                  (a: any) => a.id === availability.id,
+                                )?.is_favorite
+                                  ? "text-yellow-500"
+                                  : "text-[#a8a195]"
+                              } hover:text-yellow-500 hover:bg-[#d4cfbe]/40`}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onShareAvailability(availability.id);
+                                setFavoriteAvailability.mutate(availability.id);
                               }}
-                              title="Share"
+                              title={
+                                backendAvailabilities.find(
+                                  (a: any) => a.id === availability.id,
+                                )?.is_favorite
+                                  ? "Remove from favorites"
+                                  : "Set as favorite"
+                              }
                             >
-                              <Share2 className="h-3.5 w-3.5" />
+                              <Star
+                                className={`h-3.5 w-3.5 ${
+                                  backendAvailabilities.find(
+                                    (a: any) => a.id === availability.id,
+                                  )?.is_favorite
+                                    ? "fill-current"
+                                    : ""
+                                }`}
+                              />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-[#a8a195] hover:text-[#8b8475] hover:bg-[#d4cfbe]/40"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await copyAvailabilityLink(availability.id);
+                              }}
+                              title="Copy Link"
+                            >
+                              <LinkIcon className="h-3.5 w-3.5" />
                             </Button>
                             <Button
                               variant="ghost"

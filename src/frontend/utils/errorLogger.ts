@@ -222,25 +222,23 @@ if (import.meta.env.DEV) {
 
 // Global error handler
 window.addEventListener("error", (event) => {
-  errorLogger.logError(
-    "Uncaught error",
-    event.error,
-    {
-      component: "Global",
-      metadata: {
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno,
-      },
+  errorLogger.logError("Uncaught error", event.error, {
+    component: "Global",
+    metadata: {
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno,
     },
-  );
+  });
 });
 
 // Global unhandled promise rejection handler
 window.addEventListener("unhandledrejection", (event) => {
   errorLogger.logError(
     "Unhandled promise rejection",
-    event.reason instanceof Error ? event.reason : new Error(String(event.reason)),
+    event.reason instanceof Error
+      ? event.reason
+      : new Error(String(event.reason)),
     {
       component: "Global",
       action: "Promise rejection",

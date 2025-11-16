@@ -145,10 +145,8 @@ export function DiagnosticPanel() {
               <p>No logs yet. Errors and warnings will appear here.</p>
               <p className="text-xs mt-2">
                 Press <kbd className="px-2 py-1 bg-gray-100 rounded">Ctrl</kbd>{" "}
-                +{" "}
-                <kbd className="px-2 py-1 bg-gray-100 rounded">Shift</kbd> +{" "}
-                <kbd className="px-2 py-1 bg-gray-100 rounded">D</kbd> to
-                toggle
+                + <kbd className="px-2 py-1 bg-gray-100 rounded">Shift</kbd> +{" "}
+                <kbd className="px-2 py-1 bg-gray-100 rounded">D</kbd> to toggle
               </p>
             </div>
           ) : (
@@ -265,7 +263,9 @@ export function DiagnosticPanel() {
         {/* Footer */}
         <div className="p-3 border-t border-gray-200 bg-gray-50 text-xs text-gray-600">
           <p>
-            💡 Tip: Use <code className="px-1 bg-gray-200 rounded">Ctrl+Shift+D</code> to toggle this panel
+            💡 Tip: Use{" "}
+            <code className="px-1 bg-gray-200 rounded">Ctrl+Shift+D</code> to
+            toggle this panel
           </p>
         </div>
       </div>
