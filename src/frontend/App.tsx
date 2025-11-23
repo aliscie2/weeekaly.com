@@ -29,10 +29,14 @@ import { useOAuthIdentity } from "./hooks/useOAuthIdentity";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DiagnosticPanel } from "./components/DiagnosticPanel";
 import { Button } from "./components/ui/button";
+import { getEventTimes } from "./utils/eventHelpers";
+import { isEventSeen } from "./utils/storageHelpers";
 
 // Eager load critical pages
 import { LandingPage } from "./pages/LandingPage";
 import { ContactPage } from "./pages/ContactPage";
+import { PrivacyPage } from "./pages/PrivacyPage";
+import { TermsPage } from "./pages/TermsPage";
 
 // Lazy load non-critical pages for code splitting
 const AvailabilityPage = lazy(() =>
@@ -146,7 +150,7 @@ function AppContent() {
 
   // Use React Query to fetch backend data
   useHelloWorld();
-  useCalendarEvents(isAuthenticated);
+  const { data: googleEvents = [] } = useCalendarEvents(isAuthenticated);
   const { data: backendAvailabilities = [] } =
     useAvailabilities(isAuthenticated);
 
@@ -238,7 +242,19 @@ function AppContent() {
     },
   ]);
 
-  const [newEventCount] = useState(2);
+  // Calculate unseen event count (only future events)
+  const newEventCount = useMemo(() => {
+    const now = new Date();
+    return googleEvents.filter((event) => {
+      const { startDateTime } = getEventTimes(event);
+      if (!startDateTime) return false;
+
+      const eventStart = new Date(startDateTime);
+
+      // Only count future events that haven't been seen
+      return eventStart >= now && !isEventSeen(event.id);
+    }).length;
+  }, [googleEvents]);
 
   // Mock contacts for quick gathering
   const mockContacts = [
@@ -606,7 +622,13 @@ function AppContent() {
             path="/events"
             element={
               <ProtectedRoute>
-                <EventsPage currentUserId={CURRENT_USER_ID} />
+                <EventsPage
+                  currentUserId={CURRENT_USER_ID}
+                  onEventsViewed={() => {
+                    // Events are marked as seen automatically in EventsPage
+                    // This callback is for future use if needed
+                  }}
+                />
               </ProtectedRoute>
             }
           />
@@ -633,6 +655,12 @@ function AppContent() {
               </ProtectedRoute>
             }
           />
+
+          {/* Privacy Policy - Public page */}
+          <Route path="/privacy" element={<PrivacyPage />} />
+
+          {/* Terms of Service - Public page */}
+          <Route path="/terms" element={<TermsPage />} />
 
           {/* Catch all - redirect to landing */}
           <Route path="*" element={<Navigate to="/" replace />} />

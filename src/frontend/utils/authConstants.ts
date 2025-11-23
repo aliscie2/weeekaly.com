@@ -4,6 +4,7 @@
 
 // Session and token lifetimes
 export const AUTH_CONSTANTS = {
+  STORAGE_KEY_DELEGATION_CHAIN: "ic-delegation-chain",
   // Delegation lifetime: 30 days in nanoseconds (maximum allowed by Internet Identity)
   MAX_TIME_TO_LIVE_NS: BigInt(30 * 24 * 60 * 60 * 1000 * 1000 * 1000),
 

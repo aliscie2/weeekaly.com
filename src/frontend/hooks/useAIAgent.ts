@@ -6,11 +6,35 @@ import type { EventFormData } from "../components/EventFormModal";
 import { filterEventsByScope, type FilterScope } from "../utils/eventFilters";
 import { PROMPTS } from "../AIAgent/prompts";
 import { errorLogger } from "../utils/errorLogger";
+import { calculateMutualAvailability } from "../utils/availabilityHelpers";
 import {
-  getAvailabilitySummary,
-  type Availability as AvailabilityType,
-  type AvailabilityEvent as AvailabilityEventType,
-} from "../utils/availabilityHelpers";
+  classifyIntent,
+  extractMetadata,
+  generateCasualResponse,
+} from "../utils/intentClassifier";
+import {
+  getEventTimes,
+  checkEventConflict,
+  filterFutureEvents,
+  getEventTitle,
+  toMinimalEventTime,
+} from "../utils/eventHelpers";
+import type { CalendarEventInput } from "../utils/eventHelpers";
+import {
+  formatTime,
+  formatDate,
+  formatDayName,
+  formatShortDay,
+  formatDuration,
+  calculateDuration,
+  getCurrentTimezone,
+  getTimezoneOffset,
+} from "../utils/dateFormatters";
+import { getUserEmail, getUserInfo } from "../utils/storageHelpers";
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface AIAgentResponse {
   feedback: string;
@@ -19,15 +43,7 @@ interface AIAgentResponse {
   actions?: CalendarAction[];
 }
 
-type CalendarEventInput = {
-  id: string;
-  summary?: string;
-  title?: string;
-  start?: { dateTime?: string } | string;
-  end?: { dateTime?: string } | string;
-  startTime?: string;
-  endTime?: string;
-};
+// CalendarEventInput is now imported from eventHelpers.ts
 
 type AvailabilityInput = {
   id: string;
@@ -39,77 +55,212 @@ type ChatHistoryInput = {
   isAi: boolean;
 };
 
-type SerializedContext = {
-  now: {
-    iso: string;
-    date: string;
-    time: string;
-    timezone: string;
-    offset: number;
-  };
-  events: Array<{ id: string; t: string; s: string; e: string }>;
-  avail: Array<{ id: string; n: string }>;
-  hist: Array<{ txt: string; ai: boolean }>;
-  selectedAvail?: string | null;
-};
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
 const serializeContext = (
   events: CalendarEventInput[],
   availabilities: AvailabilityInput[],
   chatHistory: ChatHistoryInput[],
   selectedAvailabilityId: string | null = null,
-): SerializedContext => {
+) => {
   const now = new Date();
-
   return {
-    // Current time context
     now: {
       iso: now.toISOString(),
-      date: now.toLocaleDateString("en-US", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      }),
-      time: now.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      }),
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      offset: -now.getTimezoneOffset() / 60, // Hours from UTC
+      date: formatDayName(now),
+      time: formatTime(now),
+      timezone: getCurrentTimezone(),
+      offset: getTimezoneOffset(),
     },
-    events: events.map((e) => {
-      const startValue = e.start;
-      const endValue = e.end;
-      const startDateTime =
-        typeof startValue === "string"
-          ? startValue
-          : startValue?.dateTime || e.startTime || "";
-      const endDateTime =
-        typeof endValue === "string"
-          ? endValue
-          : endValue?.dateTime || e.endTime || "";
-
-      return {
-        id: e.id,
-        t: e.summary || e.title || "", // title
-        s: startDateTime, // start
-        e: endDateTime, // end
-      };
-    }),
-    avail: availabilities.map((a) => ({
-      id: a.id,
-      n: a.name, // name
+    events: events.map((e) => ({
+      id: e.id,
+      t: getEventTitle(e),
+      ...toMinimalEventTime(e),
     })),
-    hist: chatHistory.slice(-10).map((m) => ({
-      // Last 10 messages for better context
-      txt: m.text,
-      ai: m.isAi,
-    })),
-    selectedAvail: selectedAvailabilityId, // Selected availability ID
+    avail: availabilities.map((a) => ({ id: a.id, n: a.name })),
+    hist: chatHistory.slice(-10).map((m) => ({ txt: m.text, ai: m.isAi })),
+    selectedAvail: selectedAvailabilityId,
   };
 };
+
+// Removed - now using utility from eventHelpers.ts
+
+const fetchAvailabilities = async (emails: string[]) => {
+  if (emails.length === 0) return [];
+  try {
+    const { backendActor } = await import("../utils/actor");
+    const result = await backendActor.search_by_emails(emails);
+    return result.flat();
+  } catch (error) {
+    console.error("❌ Failed to fetch availabilities:", error);
+    return [];
+  }
+};
+
+const fetchOtherUsersEvents = async (
+  emailAvailabilities: any[],
+  extractedEmails: string[],
+  currentUserEmail: string | null,
+  duration: { start: Date; end: Date } | null,
+) => {
+  const otherUsersEvents: any[] = [];
+  if (!duration) return otherUsersEvents;
+
+  console.log("🔍 Fetching other users' events from Google Calendar...");
+
+  // Import token refresh utility
+  const { getValidAccessToken } = await import("../utils/tokenRefresh");
+  const accessToken = await getValidAccessToken();
+
+  if (!accessToken) {
+    console.log("❌ No access token available");
+    return otherUsersEvents;
+  }
+
+  for (const email of extractedEmails) {
+    if (email === currentUserEmail) continue;
+
+    const avail = emailAvailabilities.find(
+      (a: any) => a.owner_email?.[0] === email,
+    );
+    if (!avail) continue;
+
+    try {
+      // Fetch fresh events from Google Calendar
+      const url = new URL(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(email)}/events`,
+      );
+      url.searchParams.append("timeMin", duration.start.toISOString());
+      url.searchParams.append("timeMax", duration.end.toISOString());
+      url.searchParams.append("singleEvents", "true");
+      url.searchParams.append("orderBy", "startTime");
+      url.searchParams.append("maxResults", "250");
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const events = data.items || [];
+        const now = new Date();
+
+        // Filter out past events
+        const futureEvents = events.filter((e: any) => {
+          if (!e.start?.dateTime) return false;
+          const eventStart = new Date(e.start.dateTime);
+          return eventStart >= now;
+        });
+
+        futureEvents.forEach((e: any) => {
+          if (e.start?.dateTime && e.end?.dateTime) {
+            otherUsersEvents.push({
+              start: { dateTime: e.start.dateTime },
+              end: { dateTime: e.end.dateTime },
+              summary: e.summary || `Busy (${email})`,
+              email,
+            });
+          }
+        });
+      } else {
+        // Fallback to stored busy_times
+        if (
+          avail.busy_times &&
+          Array.isArray(avail.busy_times) &&
+          avail.busy_times.length > 0
+        ) {
+          const now = new Date();
+          avail.busy_times.forEach((busyTime: any) => {
+            const startTime = new Date(Number(busyTime.start_time) * 1000);
+            const eventStartMs = startTime.getTime();
+            // Filter: must be in future and within duration
+            if (
+              eventStartMs >= now.getTime() &&
+              eventStartMs >= duration.start.getTime() &&
+              eventStartMs <= duration.end.getTime()
+            ) {
+              otherUsersEvents.push({
+                start: { dateTime: startTime.toISOString() },
+                end: {
+                  dateTime: new Date(
+                    Number(busyTime.end_time) * 1000,
+                  ).toISOString(),
+                },
+                summary: `Busy (${email})`,
+                email,
+              });
+            }
+          });
+        }
+      }
+    } catch (error) {
+      errorLogger.logError(`Failed to fetch events for ${email}`, error, {
+        component: "useAIAgent",
+        action: "fetchOtherUsersEvents",
+      });
+    }
+  }
+
+  return otherUsersEvents;
+};
+
+const parseTimeSlots = (availData: any, action: any) => {
+  let slots = (availData.slots || action.slots) as
+    | Array<{ day_of_week: number; start_time: number; end_time: number }>
+    | undefined;
+
+  if (!slots || slots.length === 0) {
+    const days = (availData.days || action.days) as string[] | undefined;
+    const startTime = (availData.startTime || action.startTime) as
+      | string
+      | undefined;
+    const endTime = (availData.endTime || action.endTime) as string | undefined;
+
+    if (days && startTime && endTime) {
+      const dayMap: Record<string, number> = {
+        sunday: 0,
+        sun: 0,
+        monday: 1,
+        mon: 1,
+        tuesday: 2,
+        tue: 2,
+        wednesday: 3,
+        wed: 3,
+        thursday: 4,
+        thu: 4,
+        friday: 5,
+        fri: 5,
+        saturday: 6,
+        sat: 6,
+      };
+      const parseTime = (timeStr: string): number => {
+        const [hours, minutes] = timeStr.split(":").map(Number);
+        return hours * 60 + minutes;
+      };
+      const start_time = parseTime(startTime);
+      const end_time = parseTime(endTime);
+      slots = days.map((dayName) => ({
+        day_of_week: dayMap[dayName.toLowerCase()],
+        start_time,
+        end_time,
+      }));
+    }
+  }
+  return slots;
+};
+
+// Removed - now using utility from eventHelpers.ts
+
+// Removed unused function - logging happens at root level
+
+// ============================================================================
+// MAIN HOOK
+// ============================================================================
 
 export function useAIAgent(
   events: CalendarEventInput[],
@@ -130,9 +281,7 @@ export function useAIAgent(
     setIsProcessing(true);
 
     try {
-      // Removed to reduce noise - see detailed logs below
-
-      // Check if user is confirming a pending bulk delete
+      // Handle pending bulk delete confirmation
       if (pendingBulkDelete) {
         const lowerMsg = message.toLowerCase();
         if (lowerMsg.includes("yes") || lowerMsg.includes("delete all")) {
@@ -148,296 +297,101 @@ export function useAIAgent(
         }
       }
 
-      // PHASE 1: Quick model categorizes and extracts metadata (no context needed)
-      const quickAgent = new VibeCal({
-        apiKey: import.meta.env.VITE_GROQ_API_KEY,
-        quick: true,
-      });
+      // PHASE 1: Classify intent (short model)
+      const intent = classifyIntent(message);
+      const extractedData = extractMetadata(message);
 
-      // Quick model processing...
-      const category = await quickAgent.parse(message, {
-        systemPrompt: PROMPTS.CATEGORIZE_MESSAGE,
-      });
-
-      console.log("═══════════════════════════════════════════════════");
-      console.log("🔍 QUICK MODEL RESPONSE (Raw):");
-      console.log(JSON.stringify(category, null, 2));
-      console.log("═══════════════════════════════════════════════════");
-
-      // Category and metadata shown in raw response above
-
-      // Handle casual responses immediately (no need for full model)
-      if (category.type === "CASUAL") {
+      if (intent.type === "CASUAL") {
+        const response = generateCasualResponse(message);
         return {
-          feedback: category.feedback || "Got it!",
-          suggestions: category.suggestions || ["Create event", "View events"],
+          feedback: response.feedback,
+          suggestions: response.suggestions,
         };
       }
 
-      // PHASE 1.5: Extract emails, duration, and fetch availabilities
-      let extractedEmails: string[] = [];
-      let emailAvailabilities: any[] = [];
-      let duration: { start: Date; end: Date } | null = null;
+      // Extract metadata
+      const metadata = {
+        names: extractedData.names,
+        emails: extractedData.emails,
+        keywords: extractedData.keywords,
+        duration: extractedData.duration,
+      };
+      let extractedEmails: string[] = metadata.emails || [];
 
-      const metadata = category.metadata as any;
+      // Always default to next 7 days for filtering
+      const now = new Date();
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 7);
+      const duration = { start, end };
 
-      // Extract duration for event filtering
-      if (metadata?.duration) {
+      // Override if user specified a duration
+      if (metadata.duration) {
         try {
-          duration = {
-            start: new Date(metadata.duration.start),
-            end: new Date(metadata.duration.end),
-          };
-          // Duration extracted (shown in quick model response)
+          duration.start = new Date(metadata.duration.start);
+          duration.end = new Date(metadata.duration.end);
         } catch (error) {
-          console.warn("[useAIAgent] ⚠️ Failed to parse duration:", error);
+          console.warn(
+            "⚠️ Failed to parse duration, using default 7 days:",
+            error,
+          );
         }
       }
 
-      if (metadata?.emails && Array.isArray(metadata.emails)) {
-        extractedEmails = metadata.emails as string[];
-        // Emails extracted (shown in quick model response)
+      // Get current user's email first
+      const currentUserEmail = getUserEmail();
 
-        // Fetch availabilities for extracted emails
-        if (extractedEmails.length > 0) {
-          try {
-            const { backendActor } = await import("../utils/actor");
-            const availabilitiesResult =
-              await backendActor.search_by_emails(extractedEmails);
+      // Filter out current user's email from extracted emails (we already have their data)
+      const othersEmails = extractedEmails.filter(
+        (email) => email !== currentUserEmail,
+      );
 
-            // Flatten the results (search_by_emails returns Vec<Vec<Availability>>)
-            const flatResults = availabilitiesResult.flat();
+      // Fetch availabilities only for other users (not current user)
+      const emailAvailabilities = await fetchAvailabilities(othersEmails);
 
-            // BigInt values are already converted to numbers by backendCaster
-            emailAvailabilities = flatResults;
-
-            // Availabilities fetched
-          } catch (error) {
-            console.error(
-              "[useAIAgent] ❌ Failed to fetch availabilities:",
-              error,
-            );
-          }
-        }
-      }
-
-      // Add current user's email if not already included
-      const currentUserEmail = localStorage.getItem("ic-user-email");
+      // Add current user's email back for mutual availability calculation
       if (
         currentUserEmail &&
         extractedEmails.length > 0 &&
         !extractedEmails.includes(currentUserEmail)
       ) {
         extractedEmails.push(currentUserEmail);
-        // Current user email added
       }
 
-      // Final emails list prepared
+      // Filter events: only future events within duration
+      const filteredEvents = filterFutureEvents(
+        events,
+        duration.start,
+        duration.end,
+      );
 
-      // Filter events by duration BEFORE passing to AI (CRITICAL OPTIMIZATION)
-      let filteredEvents = events;
-      if (duration) {
-        filteredEvents = events.filter((e: any) => {
-          const eventStart = new Date(
-            e.start?.dateTime || e.start?.date || e.startTime || new Date(),
-          );
-          return eventStart >= duration.start && eventStart <= duration.end;
-        });
-        // Events filtered by duration
-      }
+      // Fetch other users' events from Google Calendar (excluding current user)
+      const otherUsersEvents = await fetchOtherUsersEvents(
+        emailAvailabilities,
+        othersEmails,
+        currentUserEmail,
+        duration,
+      );
 
-      // CRITICAL: Fetch other users' events during the requested duration
-      let otherUsersEvents: any[] = [];
-      if (extractedEmails.length > 0 && duration) {
-        try {
-          console.log("═══════════════════════════════════════════════════");
-          console.log("📅 FETCHING OTHER USERS' EVENTS:");
-          console.log("Emails:", extractedEmails);
-          console.log("Duration:", {
-            start: duration.start.toISOString(),
-            end: duration.end.toISOString(),
-          });
+      // Calculate mutual availability using utility function
+      const currentUserAvailability = availabilities.find(() => true);
+      const mutualAvailability = calculateMutualAvailability(
+        currentUserAvailability,
+        emailAvailabilities,
+        filteredEvents, // Already filtered to future events in duration
+        otherUsersEvents, // Already filtered to future events in duration
+        duration.start,
+        duration.end,
+      );
 
-          // For each email, fetch their events from Google Calendar
-          for (const email of extractedEmails) {
-            if (email === currentUserEmail) continue; // Skip current user
-
-            try {
-              // Get the availability to find their calendar ID
-              const avail = emailAvailabilities.find(
-                (a: any) => a.owner_email && a.owner_email[0] === email,
-              );
-
-              if (!avail) {
-                console.log(`⚠️ No availability found for ${email}`);
-                continue;
-              }
-
-              // Use their busy_times if available (already stored in backend)
-              if (avail.busy_times && Array.isArray(avail.busy_times)) {
-                console.log(
-                  `✅ Using busy_times for ${email}:`,
-                  avail.busy_times.length,
-                  "events",
-                );
-                avail.busy_times.forEach((busyTime: any) => {
-                  const startTime = new Date(
-                    Number(busyTime.start_time) * 1000,
-                  );
-                  const endTime = new Date(Number(busyTime.end_time) * 1000);
-
-                  // Only include if within requested duration
-                  if (
-                    startTime >= duration.start &&
-                    startTime <= duration.end
-                  ) {
-                    otherUsersEvents.push({
-                      start: { dateTime: startTime.toISOString() },
-                      end: { dateTime: endTime.toISOString() },
-                      summary: `Busy (${email})`,
-                      email: email,
-                    });
-                  }
-                });
-              }
-            } catch (error) {
-              console.error(`❌ Failed to fetch events for ${email}:`, error);
-            }
-          }
-
-          console.log("Total other users' events:", otherUsersEvents.length);
-          console.log("═══════════════════════════════════════════════════");
-        } catch (error) {
-          console.error(
-            "[useAIAgent] ❌ Failed to fetch other users' events:",
-            error,
-          );
-        }
-      }
-
-      // Calculate mutual availability if we have multiple people's availabilities
-      let mutualAvailability: any[] = [];
-      if (emailAvailabilities.length > 0) {
-        try {
-          // Get current user's availability
-          const currentUserAvailability = availabilities.find(() => {
-            // Match by checking if this is the user's availability
-            return true; // For now, use the first/selected availability
-          });
-
-          if (currentUserAvailability && emailAvailabilities.length > 0) {
-            // Prepare availabilities for summary calculation
-            const allAvailabilities: AvailabilityType[] = [
-              // Current user's availability
-              {
-                id: currentUserAvailability.id,
-                owner: "current-user",
-                title: currentUserAvailability.name,
-                description: "",
-                slots: (currentUserAvailability as any).slots || [],
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                created_at: BigInt(0),
-                updated_at: BigInt(0),
-              },
-              // Other users' availabilities (BigInt already converted to numbers by backendCaster)
-              ...emailAvailabilities.map((avail: any) => ({
-                id: avail.id,
-                owner: avail.owner,
-                title: avail.title,
-                description: avail.description || "",
-                slots: avail.slots || [],
-                timezone:
-                  avail.timezone ||
-                  Intl.DateTimeFormat().resolvedOptions().timeZone,
-                // Convert numbers back to BigInt for internal calculation
-                created_at: BigInt(avail.created_at || 0),
-                updated_at: BigInt(avail.updated_at || 0),
-              })),
-            ];
-
-            // Convert events to AvailabilityEventType
-            // Include BOTH current user's events AND other users' events
-            const allBusyEvents = [...filteredEvents, ...otherUsersEvents];
-
-            const availabilityEvents: AvailabilityEventType[] =
-              allBusyEvents.map((e: any) => ({
-                startTime: new Date(
-                  e.start?.dateTime ||
-                    e.start?.date ||
-                    e.startTime ||
-                    new Date(),
-                ),
-                endTime: new Date(
-                  e.end?.dateTime || e.end?.date || e.endTime || new Date(),
-                ),
-              }));
-
-            // Calculate for next 7 days
-            const startTime = new Date();
-            startTime.setHours(0, 0, 0, 0);
-            const endTime = new Date(startTime);
-            endTime.setDate(endTime.getDate() + 7);
-
-            console.log("═══════════════════════════════════════════════════");
-            console.log("🔍 CALCULATING MUTUAL AVAILABILITY:");
-            console.log(
-              "All availabilities:",
-              allAvailabilities.map((a) => ({
-                id: a.id,
-                title: a.title,
-                slots: a.slots,
-              })),
-            );
-            console.log(
-              "Events (busy times):",
-              availabilityEvents.map((e) => ({
-                start: e.startTime.toISOString(),
-                end: e.endTime.toISOString(),
-              })),
-            );
-            console.log("Time range:", {
-              start: startTime.toISOString(),
-              end: endTime.toISOString(),
-            });
-
-            // Get mutual availability summary
-            mutualAvailability = getAvailabilitySummary(
-              allAvailabilities,
-              availabilityEvents,
-              startTime,
-              endTime,
-            );
-
-            console.log(
-              "Result - Free time slots:",
-              mutualAvailability.map((block) => ({
-                start: new Date(block.start).toISOString(),
-                end: new Date(block.end).toISOString(),
-                durationMinutes: Math.round(
-                  (block.end - block.start) / (1000 * 60),
-                ),
-              })),
-            );
-            console.log("═══════════════════════════════════════════════════");
-          }
-        } catch (error) {
-          console.error(
-            "[useAIAgent] ❌ Failed to calculate mutual availability:",
-            error,
-          );
-        }
-      }
-
-      // PHASE 2: Full model handles the action with full context + metadata
-      // Use filtered events instead of all events (CRITICAL OPTIMIZATION)
+      // PHASE 2: Full model with enriched context
       const context = serializeContext(
         filteredEvents,
         availabilities,
         chatHistory,
         selectedAvailabilityId,
       );
-
-      // Convert mutual availability to readable format for AI
       const readableMutualAvailability = mutualAvailability.map(
         (block: any) => {
           const start = new Date(block.start);
@@ -467,76 +421,148 @@ export function useAIAgent(
         },
       );
 
-      // Add extracted metadata to context
-      const enrichedContext = {
-        ...context,
+      // Reduce context size: only send essential data
+      const eventTimes = filteredEvents.map(toMinimalEventTime);
+
+      const minimalContext = {
+        now: context.now,
+        events: eventTimes, // Only start/end times, not full event data
+        hist: context.hist.slice(-5), // Only last 5 messages instead of 10
+        avail: context.avail, // Include availabilities list
+        selectedAvail: context.selectedAvail, // Include selected availability ID
         extracted: {
-          ...(category.metadata || {}),
-          emails: extractedEmails, // Updated emails list with current user
-          emailAvailabilities: emailAvailabilities, // Fetched availabilities
-          mutualAvailability: readableMutualAvailability, // Calculated mutual free time (readable format)
+          emails: extractedEmails,
+          // Only send mutual availability slots - this is the clean, intersected free time
+          mutualAvailability: readableMutualAvailability.slice(0, 10), // Only top 10 slots
         },
       };
-
-      // Context prepared for full model
 
       const fullAgent = new VibeCal({
         apiKey: import.meta.env.VITE_GROQ_API_KEY,
         quick: false,
       });
-
-      // Full model processing...
       const result = await fullAgent.parse(message, {
         systemPrompt: PROMPTS.GENERIC_CALENDAR_ASSISTANT,
-        context: enrichedContext,
+        context: minimalContext,
       });
 
-      console.log("═══════════════════════════════════════════════════");
-      console.log("🤖 FULL MODEL RESPONSE (Raw):");
-      console.log(JSON.stringify(result, null, 2));
-      console.log("═══════════════════════════════════════════════════");
+      // Handle ADD_EVENT with availability validation
+      if ((result.type as string) === "ADD_EVENT") {
+        const hasAttendees = extractedEmails.length > 0;
 
-      // AI result shown in raw response above
+        // FIX: If attendees present but no mutual availability, we need more info
+        if (hasAttendees && mutualAvailability.length === 0) {
+          const emailsList = extractedEmails
+            .filter((e) => e !== currentUserEmail)
+            .join(", ");
+          return {
+            feedback: `I couldn't find any available time slots with ${emailsList}. This could mean:\n\n1. They don't have an availability set up\n2. There are no mutual free times\n3. I need a specific time range\n\nPlease specify when you'd like to meet (e.g., "tomorrow at 2pm", "next Monday morning", "this week").`,
+            suggestions: [
+              "Tomorrow at 2pm",
+              "Next Monday",
+              "This week",
+              "Cancel",
+            ],
+          };
+        }
 
-      // Handle CHECK_AVAILABILITY - format mutual availability into readable feedback
+        if (hasAttendees && mutualAvailability.length > 0) {
+          if (result.start) {
+            const suggestedStart = new Date(result.start as string);
+            const suggestedEnd = new Date(result.end as string);
+
+            const isTimeAvailable = mutualAvailability.some((slot: any) => {
+              const slotStart = new Date(slot.start);
+              const slotEnd = new Date(slot.end);
+              return suggestedStart >= slotStart && suggestedEnd <= slotEnd;
+            });
+
+            if (!isTimeAvailable) {
+              const emailsList = extractedEmails
+                .filter((e) => e !== currentUserEmail)
+                .join(", ");
+              return {
+                feedback: `⚠️ That time is not available for ${emailsList}. Let me show you the available times instead.`,
+                suggestions: ["Show available times", "Cancel"],
+                action: result,
+              };
+            }
+          } else {
+            // Show available slots
+            const defaultDuration = 15;
+            let meetingDuration = defaultDuration;
+            const durationMatch = message.match(
+              /(\d+)\s*(min|minute|minutes|hour|hours|h)/i,
+            );
+            if (durationMatch) {
+              const value = parseInt(durationMatch[1]);
+              const unit = durationMatch[2].toLowerCase();
+              meetingDuration = unit.startsWith("h") ? value * 60 : value;
+            }
+
+            const topSlots = mutualAvailability
+              .filter((block: any) => {
+                const blockDuration = Math.round(
+                  (new Date(block.end).getTime() -
+                    new Date(block.start).getTime()) /
+                    (1000 * 60),
+                );
+                return blockDuration >= meetingDuration;
+              })
+              .slice(0, 3);
+
+            if (topSlots.length === 0) {
+              const emailsList = extractedEmails
+                .filter((e) => e !== currentUserEmail)
+                .join(", ");
+              return {
+                feedback: `No time slots found that can fit a ${meetingDuration}-minute meeting with ${emailsList}. Try a shorter duration or different time range.`,
+                suggestions: ["Check availability again", "Cancel"],
+                action: result,
+              };
+            }
+
+            const emailsList = extractedEmails
+              .filter((e) => e !== currentUserEmail)
+              .join(", ");
+            const slotsText = topSlots
+              .map((block: any, index: number) => {
+                const start = new Date(block.start);
+                return `${index + 1}. ${formatDayName(start)} at ${formatTime(start)}`;
+              })
+              .join("\n");
+
+            const suggestions = topSlots.map((block: any) => {
+              const start = new Date(block.start);
+              return `Book ${formatShortDay(start)} at ${formatTime(start)}`;
+            });
+            suggestions.push("Cancel");
+
+            return {
+              feedback: `I found ${topSlots.length} available time slots for a ${meetingDuration}-minute meeting with ${emailsList}:\n\n${slotsText}\n\nWhich time works best for you?`,
+              suggestions,
+              action: { ...result, meetingDuration },
+            };
+          }
+        }
+      }
+
+      // Handle CHECK_AVAILABILITY
       if (
         (result.type as string) === "CHECK_AVAILABILITY" &&
         mutualAvailability.length > 0
       ) {
-        const formatTimeSlot = (block: any) => {
-          const start = new Date(block.start); // Use block.start, not block.startTime
-          const end = new Date(block.end); // Use block.end, not block.endTime
-          const duration = Math.round(
-            (end.getTime() - start.getTime()) / (1000 * 60),
-          ); // minutes
-
-          const timeStr = start.toLocaleTimeString("en-US", {
-            hour: "numeric",
-            minute: "2-digit",
-            hour12: true,
-          });
-          const endTimeStr = end.toLocaleTimeString("en-US", {
-            hour: "numeric",
-            minute: "2-digit",
-            hour12: true,
-          });
-
-          const hours = Math.floor(duration / 60);
-          const mins = duration % 60;
-          const durationStr =
-            hours > 0
-              ? `${hours}h ${mins > 0 ? mins + "min" : ""}`.trim()
-              : `${mins}min`;
-
-          return `• ${timeStr} - ${endTimeStr} (${durationStr})`;
-        };
-
         const emailsList = extractedEmails
           .filter((e) => e !== currentUserEmail)
           .join(", ");
         const slotsText = mutualAvailability
           .slice(0, 10)
-          .map(formatTimeSlot)
+          .map((block: any) => {
+            const start = new Date(block.start);
+            const end = new Date(block.end);
+            const duration = calculateDuration(start, end);
+            return `• ${formatDayName(start)}: ${formatTime(start)} - ${formatTime(end)} (${formatDuration(duration)})`;
+          })
           .join("\n");
 
         return {
@@ -566,7 +592,7 @@ export function useAIAgent(
         };
       }
 
-      // Handle clarification requests (no action to execute)
+      // Handle clarification requests
       if (result.type === "NEEDS_CLARIFICATION" || result.type === "QUERY") {
         return {
           feedback: result.feedback || "Could you clarify?",
@@ -577,9 +603,7 @@ export function useAIAgent(
 
       // Execute actions
       let executionFeedback: string | undefined;
-
       if (result.actions && Array.isArray(result.actions)) {
-        // Multiple actions
         const feedbacks: string[] = [];
         for (const action of result.actions) {
           try {
@@ -597,7 +621,6 @@ export function useAIAgent(
         executionFeedback =
           feedbacks.length > 0 ? feedbacks.join("\n") : undefined;
       } else if (result.type) {
-        // Single action
         try {
           executionFeedback = await executeAction(result);
         } catch (error) {
@@ -626,78 +649,55 @@ export function useAIAgent(
         error instanceof Error
           ? error.message
           : "Sorry, I couldn't process that.";
-      return {
-        feedback: errorMessage,
-        suggestions: ["Try again", "Cancel"],
-      };
+      return { feedback: errorMessage, suggestions: ["Try again", "Cancel"] };
     } finally {
       setIsProcessing(false);
     }
   };
 
+  // ============================================================================
+  // ACTION HANDLERS
+  // ============================================================================
+
   const handleCreateEvent = async (action: CalendarAction) => {
-    const title = action.title as string | undefined;
-    const description = action.description as string | undefined;
-    const start = action.start as string | undefined;
-    const end = action.end as string | undefined;
-    const location = action.location as string | undefined;
-    const attendees = action.attendees as string[] | undefined;
-    const meetingLink = action.meeting_link as boolean | undefined;
+    const { email: currentUserEmail, name: currentUserName } = getUserInfo();
 
-    // Get current user's email and name
-    const currentUserEmail = localStorage.getItem("ic-user-email");
-    const currentUserName = localStorage.getItem("ic-user-name");
-
-    // Build attendees list - always include current user first
     const attendeesList: Array<{ email: string; displayName?: string }> = [];
-
-    // Add current user if available
     if (currentUserEmail) {
       attendeesList.push({
         email: currentUserEmail,
         displayName: currentUserName || undefined,
       });
     }
-
-    // Add other attendees (avoid duplicates)
-    if (attendees && attendees.length > 0) {
-      attendees.forEach((email: string) => {
-        if (email !== currentUserEmail) {
-          attendeesList.push({ email });
-        }
+    if (action.attendees && Array.isArray(action.attendees)) {
+      (action.attendees as string[]).forEach((email: string) => {
+        if (email !== currentUserEmail) attendeesList.push({ email });
       });
     }
 
-    console.log("[useAIAgent] 📧 Final attendees list:", attendeesList);
-
     const eventData: EventFormData = {
-      summary: title || "New Event",
-      description: description,
-      start: new Date(start || new Date()),
-      end: new Date(end || new Date()),
-      location: location,
+      summary: (action.title as string) || "New Event",
+      description: action.description as string | undefined,
+      start: new Date((action.start as string) || new Date()),
+      end: new Date((action.end as string) || new Date()),
+      location: action.location as string | undefined,
       attendees: attendeesList,
-      conferenceData: meetingLink !== undefined,
+      conferenceData: (action.meeting_link as boolean) !== undefined,
     };
 
-    eventActions.handleFormSubmit(eventData);
+    if (checkEventConflict(events, eventData.start, eventData.end)) {
+      throw new Error(
+        `⚠️ Time conflict! You already have an event at ${formatTime(eventData.start)} on ${formatDate(eventData.start)}. Please choose a different time.`,
+      );
+    }
 
-    // Return formatted feedback
-    const startDate = eventData.start.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
-    const startTime = eventData.start.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    return `Created "${eventData.summary}" on ${startDate} at ${startTime}`;
+    eventActions.handleFormSubmit(eventData);
+    return `Created "${eventData.summary}" on ${formatDate(eventData.start)} at ${formatTime(eventData.start)}`;
   };
 
   const handleUpdateEvent = async (action: CalendarAction) => {
     const eventId = action.event_id as string | undefined;
     const eventTitle = action.event_title as string | undefined;
-
     const event = eventId
       ? events.find((e) => e.id === eventId)
       : events.find((e) =>
@@ -706,30 +706,16 @@ export function useAIAgent(
             .includes(eventTitle?.toLowerCase() || ""),
         );
 
-    if (!event) {
-      console.error("[useAIAgent] ❌ Event not found");
-      throw new Error("Event not found");
-    }
+    if (!event) throw new Error("Event not found");
 
-    const startValue = event.start;
-    const endValue = event.end;
-    const startDateTime =
-      typeof startValue === "string"
-        ? startValue
-        : startValue?.dateTime || new Date().toISOString();
-    const endDateTime =
-      typeof endValue === "string"
-        ? endValue
-        : endValue?.dateTime || new Date().toISOString();
-
+    const { startDateTime, endDateTime } = getEventTimes(event);
     const updates: Partial<EventFormData> = {
       summary: event.summary || event.title || "Untitled Event",
-      start: new Date(startDateTime),
-      end: new Date(endDateTime),
+      start: new Date(startDateTime || new Date()),
+      end: new Date(endDateTime || new Date()),
     };
 
     const changesList: string[] = [];
-
     const changes = action.changes as
       | {
           title?: string;
@@ -752,19 +738,15 @@ export function useAIAgent(
       }
       if (changes.start) {
         updates.start = new Date(changes.start);
-        const time = updates.start.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        });
-        changesList.push(`start time to ${time}`);
+        changesList.push(
+          `start time to ${updates.start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+        );
       }
       if (changes.end) {
         updates.end = new Date(changes.end);
-        const time = updates.end.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        });
-        changesList.push(`end time to ${time}`);
+        changesList.push(
+          `end time to ${updates.end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+        );
       }
       if (changes.location) {
         updates.location = changes.location;
@@ -779,8 +761,6 @@ export function useAIAgent(
     }
 
     eventActions.openEditForm(event.id, updates);
-
-    // Return formatted feedback
     const changesText =
       changesList.length > 0 ? changesList.join(", ") : "event details";
     return `Updated "${event.summary || event.title}" - changed ${changesText}`;
@@ -801,121 +781,33 @@ export function useAIAgent(
             ?.toLowerCase()
             .includes(eventTitle?.toLowerCase() || ""),
         );
-
-    if (!event) {
-      console.error("[useAIAgent] ❌ Not found:", eventTitle);
-      throw new Error(`Event not found: "${eventTitle}"`);
-    }
+    if (!event) throw new Error(`Event not found: "${eventTitle}"`);
 
     const foundEventTitle = event.summary || event.title || "Untitled Event";
     eventActions.handleDeleteEvent(event.id, foundEventTitle);
-
-    // Return formatted feedback
     return `Deleted "${foundEventTitle}"`;
   };
 
   const handleAddAvailability = async (action: CalendarAction) => {
-    console.log("[useAIAgent] 📥 Raw action received:", action);
-
-    // Check if data is nested in 'availability' object
     const availData = (action.availability as any) || action;
-
     const title =
       (availData.title as string) ||
       (action.title as string) ||
       "My Availability";
     const description =
       (availData.description as string) || (action.description as string) || "";
-
-    // Check if AI returned slots in the correct format
-    let slots = (availData.slots || action.slots) as
-      | Array<{
-          day_of_week: number;
-          start_time: number;
-          end_time: number;
-        }>
-      | undefined;
-
-    // If not, try to convert from AI's format (days, startTime, endTime)
-    if (!slots || slots.length === 0) {
-      const days = (availData.days || action.days) as string[] | undefined;
-      const startTime = (availData.startTime || action.startTime) as
-        | string
-        | undefined;
-      const endTime = (availData.endTime || action.endTime) as
-        | string
-        | undefined;
-
-      console.log("[useAIAgent] 🔄 Converting AI format:", {
-        days,
-        startTime,
-        endTime,
-      });
-
-      if (days && startTime && endTime) {
-        // Convert day names to day_of_week numbers
-        const dayMap: Record<string, number> = {
-          sunday: 0,
-          sun: 0,
-          monday: 1,
-          mon: 1,
-          tuesday: 2,
-          tue: 2,
-          wednesday: 3,
-          wed: 3,
-          thursday: 4,
-          thu: 4,
-          friday: 5,
-          fri: 5,
-          saturday: 6,
-          sat: 6,
-        };
-
-        // Convert time strings to minutes from midnight
-        const parseTime = (timeStr: string): number => {
-          const [hours, minutes] = timeStr.split(":").map(Number);
-          return hours * 60 + minutes;
-        };
-
-        const start_time = parseTime(startTime);
-        const end_time = parseTime(endTime);
-
-        // Create slots for each day
-        slots = days.map((dayName) => {
-          const day_of_week = dayMap[dayName.toLowerCase()];
-          return { day_of_week, start_time, end_time };
-        });
-
-        console.log("[useAIAgent] ✅ Converted to slots:", slots);
-      }
-    }
-
-    console.log("═══════════════════════════════════════════════════");
-    console.log("📊 AVAILABILITY SLOTS TO CREATE:");
-    console.log("Title:", title);
-    console.log("Slots:", JSON.stringify(slots, null, 2));
-    console.log("═══════════════════════════════════════════════════");
+    const slots = parseTimeSlots(availData, action);
 
     if (!slots || slots.length === 0) {
-      console.error("[useAIAgent] ❌ No slots found in action:", action);
-      console.error(
-        "[useAIAgent] 🔍 Full action object:",
-        JSON.stringify(action, null, 2),
-      );
       throw new Error(
         "No time slots provided. Please specify days and times (e.g., 'every day from 9am to 6pm')",
       );
     }
 
-    // Import dynamically to avoid circular dependency
     const { backendActor } = await import("../utils/actor");
     const { getValidAccessToken } = await import("../utils/tokenRefresh");
+    const { email, name } = getUserInfo();
 
-    // Get email and name from localStorage
-    const email = localStorage.getItem("ic-user-email");
-    const name = localStorage.getItem("ic-user-name");
-
-    // Fetch busy times from Google Calendar
     let busyTimes: Array<{ start_time: bigint; end_time: bigint }> = [];
     try {
       const accessToken = await getValidAccessToken();
@@ -923,7 +815,6 @@ export function useAIAgent(
         const timeMin = new Date();
         const timeMax = new Date();
         timeMax.setDate(timeMax.getDate() + 90);
-
         const url = new URL(
           "https://www.googleapis.com/calendar/v3/calendars/primary/events",
         );
@@ -939,11 +830,9 @@ export function useAIAgent(
             Accept: "application/json",
           },
         });
-
         if (response.ok) {
           const data = await response.json();
           const events = data.items || [];
-
           busyTimes = events
             .filter((e: any) => e.start?.dateTime && e.end?.dateTime)
             .map((e: any) => ({
@@ -957,8 +846,7 @@ export function useAIAgent(
         }
       }
     } catch (error) {
-      console.warn("[useAIAgent] ⚠️ Failed to fetch busy times:", error);
-      // Continue without busy times
+      console.warn("⚠️ Failed to fetch busy times:", error);
     }
 
     const request = {
@@ -974,89 +862,27 @@ export function useAIAgent(
     };
 
     const result = await backendActor.create_availability(request);
+    if ("Err" in result) throw new Error(result.Err);
 
-    if ("Err" in result) {
-      console.error("[useAIAgent] ❌ Backend error:", result.Err);
-      throw new Error(result.Err);
-    }
-
-    console.log("[useAIAgent] ✅ Availability created:", result.Ok);
-
-    // Invalidate React Query cache to refetch availabilities
-    // queryClient is already available from the hook scope
     queryClient.invalidateQueries({ queryKey: ["availabilities"] });
-
-    // Return formatted feedback
     const daysText = slots.length === 7 ? "every day" : `${slots.length} days`;
     return `Created availability "${title}" for ${daysText}`;
   };
 
   const handleUpdateAvailability = async (action: CalendarAction) => {
-    console.log("[useAIAgent] 📥 Update availability action:", action);
-
-    // Get the availability ID - priority: action > selected > first
     const availabilityId =
       (action.availability_id as string) ||
       (action.id as string) ||
       selectedAvailabilityId ||
-      availabilities[0]?.id; // Default to first if only one exists
+      availabilities[0]?.id;
+    if (!availabilityId) throw new Error("No availability ID found");
 
-    if (!availabilityId) {
-      throw new Error("No availability ID found");
-    }
-
-    console.log("[useAIAgent] 🔄 Updating availability:", availabilityId);
-
-    // Check if data is nested
     const availData = (action.availability as any) || action.changes || action;
-
     const title = availData.title as string | undefined;
     const description = availData.description as string | undefined;
+    const slots = parseTimeSlots(availData, action);
 
-    // Convert slots if provided
-    let slots:
-      | Array<{
-          day_of_week: number;
-          start_time: number;
-          end_time: number;
-        }>
-      | undefined;
-
-    if (availData.slots) {
-      slots = availData.slots;
-    } else if (availData.days && availData.startTime && availData.endTime) {
-      // Convert from AI format
-      const dayMap: Record<string, number> = {
-        sunday: 0,
-        monday: 1,
-        tuesday: 2,
-        wednesday: 3,
-        thursday: 4,
-        friday: 5,
-        saturday: 6,
-      };
-
-      const parseTime = (timeStr: string): number => {
-        const [hours, minutes] = timeStr.split(":").map(Number);
-        return hours * 60 + minutes;
-      };
-
-      const start_time = parseTime(availData.startTime);
-      const end_time = parseTime(availData.endTime);
-
-      slots = (availData.days as string[]).map((dayName) => ({
-        day_of_week: dayMap[dayName.toLowerCase()],
-        start_time,
-        end_time,
-      }));
-    }
-
-    console.log("[useAIAgent] 📊 Update data:", { title, description, slots });
-
-    // Import backend actor
     const { backendActor } = await import("../utils/actor");
-
-    // Build update request (Candid optional format)
     const request: {
       id: string;
       title: [] | [string];
@@ -1079,20 +905,10 @@ export function useAIAgent(
       timezone: [],
     };
 
-    console.log("[useAIAgent] 📤 Sending update request:", request);
-
     const result = await backendActor.update_availability(request);
+    if ("Err" in result) throw new Error(result.Err);
 
-    if ("Err" in result) {
-      console.error("[useAIAgent] ❌ Backend error:", result.Err);
-      throw new Error(result.Err);
-    }
-
-    console.log("[useAIAgent] ✅ Availability updated:", result.Ok);
-
-    // Invalidate cache
     queryClient.invalidateQueries({ queryKey: ["availabilities"] });
-
     const daysText = slots
       ? slots.length === 7
         ? "every day"
@@ -1105,52 +921,30 @@ export function useAIAgent(
     result: CalendarAction,
   ): Promise<string | undefined> => {
     const actionType = result.type?.toUpperCase();
-
     const actions: Record<string, () => Promise<string | undefined>> = {
-      ADD_EVENT: async () => {
-        return await handleCreateEvent(result);
-      },
-      UPDATE_EVENT: async () => {
-        return await handleUpdateEvent(result);
-      },
-      DELETE_EVENT: async () => {
-        return await handleDeleteEvent(result);
-      },
-      ADD_AVAILABILITY: async () => {
-        return await handleAddAvailability(result);
-      },
-      UPDATE_AVAILABILITY: async () => {
-        return await handleUpdateAvailability(result);
-      },
-      NEEDS_CLARIFICATION: async () => {
-        return undefined;
-      },
+      ADD_EVENT: async () => await handleCreateEvent(result),
+      UPDATE_EVENT: async () => await handleUpdateEvent(result),
+      DELETE_EVENT: async () => await handleDeleteEvent(result),
+      ADD_AVAILABILITY: async () => await handleAddAvailability(result),
+      UPDATE_AVAILABILITY: async () => await handleUpdateAvailability(result),
+      NEEDS_CLARIFICATION: async () => undefined,
     };
-
     const action = actions[actionType];
-    if (action) {
-      return await action();
-    } else {
-      return undefined;
-    }
+    return action ? await action() : undefined;
   };
 
   const handleBulkDelete = useCallback(
     async (filter: string): Promise<AIAgentResponse> => {
-      // Filter events using utility
       const eventsToDelete = filterEventsByScope(events, filter as FilterScope);
-
-      // Delete all filtered events
       for (const event of eventsToDelete) {
         try {
           const eventId = event.id || "";
           const eventTitle = event.summary || event.title || "Untitled Event";
           await eventActions.handleDeleteEvent(eventId, eventTitle);
         } catch (error) {
-          console.error(`[useAIAgent] ❌ Failed to delete ${event.id}:`, error);
+          console.error(`❌ Failed to delete ${event.id}:`, error);
         }
       }
-
       return {
         feedback: `✅ Successfully deleted ${eventsToDelete.length} event${eventsToDelete.length === 1 ? "" : "s"}.`,
         suggestions: ["Create event", "View events"],
@@ -1159,9 +953,5 @@ export function useAIAgent(
     [events, eventActions],
   );
 
-  return {
-    processMessage,
-    isProcessing,
-    eventActions,
-  };
+  return { processMessage, isProcessing, eventActions };
 }

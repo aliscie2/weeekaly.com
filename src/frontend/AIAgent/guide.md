@@ -365,23 +365,16 @@ if (result.actions && Array.isArray(result.actions)) {
 
 **Compression**: Uses short keys (t, s, e, n) to reduce token usage
 
-## ~~Streaming~~ (REMOVED)
+## Processing Approach
 
-**Status**: Streaming functionality has been removed to simplify the codebase.
-
-**Previous Issues**:
-
-- Complex error handling
-- Difficult to debug
-- Added unnecessary complexity
-- Parsing issues with incomplete responses
-
-**Current Approach**: Simple synchronous processing
+**Current**: Simple synchronous processing
 
 - Call AI API once
 - Wait for complete response
 - Parse and return result
 - Simpler, more reliable
+
+**Note**: Streaming was previously implemented but removed to reduce complexity and improve reliability.
 
 ## Error Handling
 
@@ -523,8 +516,8 @@ VITE_GROQ_API_KEY: string; // Required
 
    - "create 5 events" → Creates 5 events
 
-6. **Streaming**
-   - Response appears letter-by-letter
+6. **Response Time**
+   - Typical response in 1-3 seconds
 
 ## Troubleshooting
 
@@ -547,37 +540,25 @@ VITE_GROQ_API_KEY: string; // Required
 2. Verify chat history array
 3. Check prompt uses context
 
-### Streaming not working
+### Slow response times
 
-1. Check callbacks are passed
-2. Verify API supports streaming
-3. Check network tab for SSE
+1. Check network connection
+2. Verify API key is valid
+3. Consider using keyword fast path for common commands
 
-## Recent Changes & Fixes
+## Recent Improvements
 
-### ✅ Completed
+### Completed
 
-1. **Removed Streaming** - Simplified codebase, removed 200+ lines of complex code
-2. **Fixed JSON Extraction** - Now uses indexOf/lastIndexOf to get complete JSON objects
-3. **Improved Error Handling** - No more console.error, graceful fallbacks
-4. **Better Query Detection** - More flexible patterns, handles typos
-5. **Added Comprehensive Logging** - Debug-friendly console.log messages
+1. **Removed Streaming** - Simplified codebase
+2. **Fixed JSON Extraction** - Robust parsing with indexOf/lastIndexOf
+3. **Improved Error Handling** - Graceful fallbacks
+4. **Better Query Detection** - Flexible patterns
+5. **Comprehensive Logging** - Debug-friendly output
 
-### 🔄 In Progress
+### Known Issues
 
-1. **Event Filtering Debug** - Added logging to identify why 0 events returned
-2. **Multi-Action Testing** - Verifying "create 3 events" works correctly
-3. **Query Response Quality** - Improving AI responses for questions
-
-### 📋 Known Issues
-
-1. **Event Filtering** - Sometimes returns 0 events when events exist
-   - Likely timezone or date format issue
-   - Added debug logging to investigate
-2. **AI Plain Text Responses** - Sometimes returns text instead of JSON
-   - Need to strengthen prompts
-   - Consider using full model for queries
-3. **Multi-Action Execution** - Not fully tested yet
+See [AI_AGENT_ISSUES.md](../../../AI_AGENT_ISSUES.md) for detailed issue tracking and solutions.
 
 ## Summary
 

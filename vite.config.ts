@@ -45,6 +45,7 @@ function initCanisterIds() {
 const isDevelopment = process.env.NODE_ENV !== "production" || localEnv;
 initCanisterIds();
 
+// eslint-disable-next-line import/no-default-export
 export default defineConfig({
   publicDir: "public",
   build: {

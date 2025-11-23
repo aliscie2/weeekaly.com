@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { PageHelmet } from "../components/PageHelmet";
 import { Button } from "../components/ui/button";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
 
@@ -22,6 +23,7 @@ export function DeleteConfirmationPage({
       transition={{ duration: 0.6 }}
       className="flex-1 overflow-y-auto py-8 md:py-12 px-4 md:px-8"
     >
+      <PageHelmet title="Delete Confirmation" />
       <div className="max-w-2xl mx-auto">
         {/* Back Button */}
         <motion.div

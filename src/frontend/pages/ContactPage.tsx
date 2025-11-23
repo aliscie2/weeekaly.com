@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router-dom";
+import { PageHelmet } from "../components/PageHelmet";
 import { ChatMessage } from "../components/ChatMessage";
 import { ChatInput } from "../components/ChatInput";
 import {
@@ -90,29 +91,17 @@ const convertBackendSlotsToUI = (
 ): Map<number, TimeSlot[]> => {
   const slotsByDay = new Map<number, TimeSlot[]>();
 
-  console.log("═══════════════════════════════════════════════════");
-  console.log("🔄 CONVERTING BACKEND SLOTS TO UI:");
-  console.log("Input slots:", JSON.stringify(backendSlots, null, 2));
-
   for (const slot of backendSlots) {
     const startHours = Math.floor(slot.start_time / 60);
     const startMinutes = slot.start_time % 60;
     const endHours = Math.floor(slot.end_time / 60);
     const endMinutes = slot.end_time % 60;
 
-    console.log(`Day ${slot.day_of_week}:`);
-    console.log(
-      `  start_time: ${slot.start_time} → ${startHours}:${startMinutes}`,
-    );
-    console.log(`  end_time: ${slot.end_time} → ${endHours}:${endMinutes}`);
-
     const formatTime = (hours: number, minutes: number): string => {
       const period = hours >= 12 ? "PM" : "AM";
       const displayHours = hours % 12 || 12;
       const displayMinutes = minutes.toString().padStart(2, "0");
-      const result = `${displayHours}:${displayMinutes} ${period}`;
-      console.log(`    formatTime(${hours}, ${minutes}) → "${result}"`);
-      return result;
+      return `${displayHours}:${displayMinutes} ${period}`;
     };
 
     const timeSlot: TimeSlot = {
@@ -120,15 +109,11 @@ const convertBackendSlotsToUI = (
       end: formatTime(endHours, endMinutes),
     };
 
-    console.log(`  Result: ${timeSlot.start} - ${timeSlot.end}`);
-
     if (!slotsByDay.has(slot.day_of_week)) {
       slotsByDay.set(slot.day_of_week, []);
     }
     slotsByDay.get(slot.day_of_week)!.push(timeSlot);
   }
-
-  console.log("═══════════════════════════════════════════════════");
 
   return slotsByDay;
 };
@@ -288,6 +273,31 @@ export function ContactPage({
       localStorage.getItem(AUTH_CONSTANTS.STORAGE_KEY_USER_PICTURE) || "";
     const name =
       localStorage.getItem(AUTH_CONSTANTS.STORAGE_KEY_USER_NAME) || "";
+
+    console.log("🖼️ [ContactPage] Loading user avatar from localStorage:", {
+      picture,
+      name,
+      hasPicture: !!picture,
+      pictureLength: picture.length,
+      storageKey: AUTH_CONSTANTS.STORAGE_KEY_USER_PICTURE,
+      allStorageKeys: Object.keys(localStorage),
+    });
+
+    // Test if the picture URL is accessible
+    if (picture) {
+      const img = new Image();
+      img.onload = () => {
+        console.log("✅ [ContactPage] Avatar image loaded successfully");
+      };
+      img.onerror = (error) => {
+        console.error("❌ [ContactPage] Failed to load avatar image:", {
+          url: picture,
+          error,
+        });
+      };
+      img.src = picture;
+    }
+
     setUserAvatar(picture);
     setUserName(name);
   }, []);
@@ -439,6 +449,7 @@ export function ContactPage({
 
   return (
     <>
+      <PageHelmet title="Chat" />
       {/* Header */}
       <motion.header
         initial={{ opacity: 0, y: -20 }}
@@ -678,7 +689,11 @@ export function ContactPage({
               >
                 {userAvatar ? (
                   <Avatar className="h-5 w-5 md:h-6 md:w-6">
-                    <AvatarImage src={userAvatar} alt={userName} />
+                    <AvatarImage
+                      src={userAvatar}
+                      alt={userName}
+                      referrerPolicy="no-referrer"
+                    />
                     <AvatarFallback className="bg-[#8b8475] text-white text-xs">
                       {userName.charAt(0).toUpperCase()}
                     </AvatarFallback>

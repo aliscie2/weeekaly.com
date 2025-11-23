@@ -85,10 +85,7 @@ export const AvailabilityHeader = memo(function AvailabilityHeader({
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => {
-                console.log("[AvailabilityHeader] Previous week clicked");
-                onPreviousWeek();
-              }}
+              onClick={onPreviousWeek}
               className={`text-[#8b8475] hover:bg-[#e8e4d9]/60 ${isMobile ? "h-8 w-8" : "h-9 w-9"}`}
             >
               <ChevronLeft className={`${isMobile ? "h-4 w-4" : "h-4 w-4"}`} />
@@ -97,10 +94,7 @@ export const AvailabilityHeader = memo(function AvailabilityHeader({
             <Button
               type="button"
               variant="ghost"
-              onClick={() => {
-                console.log("[AvailabilityHeader] Today clicked");
-                onToday();
-              }}
+              onClick={onToday}
               size={isMobile ? "sm" : "default"}
               className={`text-[#8b8475] hover:bg-[#e8e4d9]/60 ${isMobile ? "px-2 text-xs min-w-[44px]" : "px-3 text-xs"}`}
               disabled={isCurrentWeek}
@@ -139,10 +133,7 @@ export const AvailabilityHeader = memo(function AvailabilityHeader({
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => {
-                console.log("[AvailabilityHeader] Next week clicked");
-                onNextWeek();
-              }}
+              onClick={onNextWeek}
               className={`text-[#8b8475] hover:bg-[#e8e4d9]/60 ${isMobile ? "h-8 w-8" : "h-9 w-9"}`}
             >
               <ChevronRight className={`${isMobile ? "h-4 w-4" : "h-4 w-4"}`} />

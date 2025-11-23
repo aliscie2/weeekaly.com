@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router-dom";
+import { PageHelmet } from "../components/PageHelmet";
 import { Button } from "../components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import {
@@ -42,18 +43,43 @@ export function ProfilePage({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // Get Google user data from localStorage - memoized to prevent unnecessary recalculations
+  // Get Google user data from localStorage - always read fresh from localStorage
+  // Don't use useMemo with dependencies because localStorage might update independently
   const googleUserData = useMemo(() => {
     const email =
       localStorage.getItem(AUTH_CONSTANTS.STORAGE_KEY_USER_EMAIL) || "";
     const name =
       localStorage.getItem(AUTH_CONSTANTS.STORAGE_KEY_USER_NAME) || username;
     const picture =
-      localStorage.getItem(AUTH_CONSTANTS.STORAGE_KEY_USER_PICTURE) ||
-      userAvatar;
+      localStorage.getItem(AUTH_CONSTANTS.STORAGE_KEY_USER_PICTURE) || "";
 
-    return { email, name, picture };
-  }, [username, userAvatar]);
+    console.log("🖼️ [ProfilePage] Loading user data from localStorage:", {
+      email,
+      name,
+      picture,
+      hasPicture: !!picture,
+      pictureLength: picture.length,
+      fallbackAvatar: userAvatar,
+      storageKey: AUTH_CONSTANTS.STORAGE_KEY_USER_PICTURE,
+      allStorageKeys: Object.keys(localStorage),
+    });
+
+    console.log("🖼️ [ProfilePage] Props received:", {
+      username,
+      userAvatar,
+      userAvatarLength: userAvatar?.length,
+    });
+
+    const finalPicture = picture || userAvatar;
+    console.log("🖼️ [ProfilePage] Final picture to use:", finalPicture);
+
+    // Use localStorage picture first, fallback to prop only if localStorage is empty
+    return {
+      email,
+      name,
+      picture: finalPicture,
+    };
+  }, [username, userAvatar]); // Keep dependencies to trigger re-render when props change
 
   /**
    * Handle logout with complete cleanup
@@ -108,6 +134,7 @@ export function ProfilePage({
       transition={{ duration: 0.6 }}
       className="flex-1 overflow-y-auto py-8 md:py-12 px-4 md:px-8"
     >
+      <PageHelmet title="Profile" />
       <div className="max-w-3xl mx-auto">
         {/* Back Button */}
         <motion.div
@@ -144,9 +171,25 @@ export function ProfilePage({
                       onClick={handleAvatarClick}
                     >
                       <AvatarImage
-                        src={googleUserData.picture || userAvatar}
+                        src={(() => {
+                          const src = googleUserData.picture || userAvatar;
+                          console.log("🖼️ [ProfilePage] Avatar src:", src);
+                          return src;
+                        })()}
                         alt={googleUserData.name || username}
                         className="object-cover"
+                        referrerPolicy="no-referrer"
+                        onLoad={() =>
+                          console.log(
+                            "✅ [ProfilePage] Avatar image loaded successfully",
+                          )
+                        }
+                        onError={(e) =>
+                          console.error(
+                            "❌ [ProfilePage] Avatar image failed to load:",
+                            e,
+                          )
+                        }
                       />
                       <AvatarFallback className="bg-[#8b8475] text-white text-2xl md:text-3xl">
                         {(googleUserData.name || username)
@@ -276,6 +319,7 @@ export function ProfilePage({
                         src={googleUserData.picture}
                         alt={googleUserData.name}
                         className="object-cover"
+                        referrerPolicy="no-referrer"
                       />
                       <AvatarFallback className="bg-[#8b8475] text-white">
                         {googleUserData.name.charAt(0).toUpperCase()}

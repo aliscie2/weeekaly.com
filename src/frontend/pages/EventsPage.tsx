@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router-dom";
+import { PageHelmet } from "../components/PageHelmet";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -67,9 +68,10 @@ interface Event {
 
 interface EventsPageProps {
   currentUserId: string;
+  onEventsViewed: () => void;
 }
 
-export function EventsPage({ currentUserId }: EventsPageProps) {
+export function EventsPage({ currentUserId, onEventsViewed }: EventsPageProps) {
   const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState<
     "today" | "week" | "month" | "past"
@@ -80,6 +82,7 @@ export function EventsPage({ currentUserId }: EventsPageProps) {
   useEffect(() => {
     isFirstMount.current = false;
   }, []);
+
   const [deleteConfirm, setDeleteConfirm] = useState<{
     eventId: string;
     eventTitle: string;
@@ -92,8 +95,43 @@ export function EventsPage({ currentUserId }: EventsPageProps) {
     error: eventsError,
   } = useCalendarEvents(true);
 
+  // Track which events have been marked as seen
+  const [seenEvents, setSeenEvents] = useState<Set<string>>(new Set());
+
+  // Mark a specific event as seen
+  const markEventAsSeen = (eventId: string) => {
+    localStorage.setItem(`event_seen_${eventId}`, "true");
+    setSeenEvents((prev) => new Set(prev).add(eventId));
+    // Notify parent to update badge count
+    onEventsViewed();
+  };
+
   // Use event actions hook
   const eventActions = useEventActions();
+
+  // Check if event is new (not seen yet)
+  const isEventNew = (eventId: string): boolean => {
+    return (
+      localStorage.getItem(`event_seen_${eventId}`) !== "true" &&
+      !seenEvents.has(eventId)
+    );
+  };
+
+  // Mark all future events as seen when page loads
+  useEffect(() => {
+    const now = new Date();
+    googleEvents.forEach((event) => {
+      const startTime = event.start?.dateTime || event.start?.date;
+      if (!startTime) return;
+
+      const eventStart = new Date(startTime);
+
+      // Only mark future events as seen
+      if (eventStart >= now) {
+        markEventAsSeen(event.id);
+      }
+    });
+  }, [googleEvents]); // Run when events change
 
   // Convert Google Calendar events to our Event format - memoized to prevent recalculation
   const events: Event[] = useMemo(() => {
@@ -152,9 +190,6 @@ export function EventsPage({ currentUserId }: EventsPageProps) {
       });
   }, [events, activeFilter]);
 
-  const formatTime = (date: Date) => format(date, "h:mm a");
-  const formatDate = (date: Date) => format(date, "MMM d, yyyy");
-
   return (
     <motion.div
       initial={isFirstMount.current ? { opacity: 0, y: 20 } : false}
@@ -162,6 +197,7 @@ export function EventsPage({ currentUserId }: EventsPageProps) {
       transition={{ duration: 0.6 }}
       className="flex-1 overflow-hidden flex flex-col py-4 md:py-8 px-4 md:px-8"
     >
+      <PageHelmet title="Events" />
       <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
         {/* Back Button */}
         <motion.div
@@ -298,188 +334,17 @@ export function EventsPage({ currentUserId }: EventsPageProps) {
                   </motion.div>
                 ) : (
                   filteredEvents.map((event, index) => (
-                    <motion.div
+                    <EventCard
                       key={event.id}
-                      initial={
-                        isFirstMount.current ? { opacity: 0, x: -20 } : false
-                      }
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05, duration: 0.4 }}
-                    >
-                      <Card className="bg-white/60 border-[#d4cfbe]/40 hover:shadow-lg transition-all overflow-hidden">
-                        <div className="flex gap-3 p-3 md:p-4">
-                          {/* Thumbnail */}
-                          <div className="shrink-0">
-                            <div
-                              className="w-16 h-16 md:w-20 md:h-20 rounded-lg bg-cover bg-center border-2 border-[#e8e4d9]"
-                              style={{
-                                backgroundImage: `url(${event.thumbnail})`,
-                              }}
-                            />
-                          </div>
-
-                          {/* Content */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2 mb-2">
-                              <h3 className="text-[#8b8475] text-sm md:text-base line-clamp-1">
-                                {event.title}
-                              </h3>
-                              {isFuture(event.startTime) && (
-                                <Badge className="bg-green-100 text-green-700 border-green-200 text-xs shrink-0">
-                                  Upcoming
-                                </Badge>
-                              )}
-                            </div>
-
-                            {/* Time */}
-                            <div className="flex items-center gap-1 text-xs text-[#8b8475] mb-2">
-                              <Clock className="h-3 w-3" />
-                              <span>
-                                {formatTime(event.startTime)} -{" "}
-                                {formatTime(event.endTime)}
-                              </span>
-                              <span className="text-[#a8a195] ml-1">
-                                • {formatDate(event.startTime)}
-                              </span>
-                            </div>
-
-                            {/* Countdown Timer - Only show for today's events */}
-                            {activeFilter === "today" &&
-                              isToday(event.startTime) && (
-                                <div className="mb-2">
-                                  <CountdownTimer
-                                    startDate={event.startTime}
-                                    endDate={event.endTime}
-                                  />
-                                </div>
-                              )}
-
-                            {/* AI Summary */}
-                            <div className="flex items-start gap-1 mb-3">
-                              <Sparkles className="h-3 w-3 text-[#8b8475] shrink-0 mt-0.5" />
-                              <p className="text-xs text-[#a8a195] line-clamp-2">
-                                {event.aiSummary}
-                              </p>
-                            </div>
-
-                            {/* Footer */}
-                            <div className="flex items-center justify-between gap-2">
-                              {/* Attendees */}
-                              <div className="flex items-center -space-x-2">
-                                {event.attendees.slice(0, 4).map((attendee) => (
-                                  <Avatar
-                                    key={attendee.id}
-                                    className="h-6 w-6 border-2 border-white"
-                                  >
-                                    <AvatarImage
-                                      src={attendee.avatar}
-                                      alt={attendee.name}
-                                      className="object-cover"
-                                    />
-                                    <AvatarFallback className="bg-[#8b8475] text-white text-xs">
-                                      {attendee.name.charAt(0).toUpperCase()}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                ))}
-                                {event.attendees.length > 4 && (
-                                  <div className="h-6 w-6 rounded-full bg-[#8b8475] border-2 border-white flex items-center justify-center text-xs text-white">
-                                    +{event.attendees.length - 4}
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Action Buttons */}
-                              <div className="flex items-center gap-1">
-                                {/* Google Meet Link */}
-                                {event.meetLink && (
-                                  <Button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      window.open(event.meetLink, "_blank");
-                                    }}
-                                    size="sm"
-                                    variant="outline"
-                                    className="bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-700 border-blue-200 h-7 px-2 text-xs"
-                                  >
-                                    <Video className="h-3 w-3 mr-1" />
-                                    Join
-                                  </Button>
-                                )}
-
-                                {/* Edit Button (only for own events) */}
-                                {event.createdBy === currentUserId && (
-                                  <Button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      eventActions.openEditForm(event.id, {
-                                        summary: event.title,
-                                        description: event.aiSummary,
-                                        start: event.startTime,
-                                        end: event.endTime,
-                                        location: event.location,
-                                        attendees: event.attendees.map((a) => ({
-                                          email: a.email,
-                                          displayName: a.name,
-                                        })),
-                                        conferenceData: !!event.meetLink, // Preserve existing Meet link
-                                      });
-                                    }}
-                                    size="sm"
-                                    variant="outline"
-                                    className="bg-green-50 hover:bg-green-100 text-green-600 hover:text-green-700 border-green-200 h-7 px-2 text-xs"
-                                    disabled={eventActions.isLoading}
-                                  >
-                                    <Edit className="h-3 w-3 mr-1" />
-                                    Edit
-                                  </Button>
-                                )}
-
-                                {/* Delete or Cancel Button */}
-                                {event.createdBy === currentUserId ? (
-                                  <Button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setDeleteConfirm({
-                                        eventId: event.id,
-                                        eventTitle: event.title,
-                                      });
-                                    }}
-                                    size="sm"
-                                    variant="outline"
-                                    className="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 border-red-200 h-7 px-2 text-xs"
-                                    disabled={eventActions.isLoading}
-                                  >
-                                    <Trash2 className="h-3 w-3 mr-1" />
-                                    Delete
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      eventActions.handleCancelAttendance(
-                                        event.id,
-                                        event.title,
-                                      );
-                                    }}
-                                    size="sm"
-                                    variant="outline"
-                                    className="bg-orange-50 hover:bg-orange-100 text-orange-600 hover:text-orange-700 border-orange-200 h-7 px-2 text-xs"
-                                    disabled={eventActions.isLoading}
-                                  >
-                                    <XCircle className="h-3 w-3 mr-1" />
-                                    Cancel
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </Card>
-                    </motion.div>
+                      event={event}
+                      index={index}
+                      isFirstMount={isFirstMount.current}
+                      isEventNew={isEventNew(event.id)}
+                      onMarkAsSeen={() => markEventAsSeen(event.id)}
+                      currentUserId={currentUserId}
+                      eventActions={eventActions}
+                      activeFilter={activeFilter}
+                    />
                   ))
                 )}
               </div>
@@ -535,5 +400,305 @@ export function EventsPage({ currentUserId }: EventsPageProps) {
         </AlertDialogContent>
       </AlertDialog>
     </motion.div>
+  );
+}
+
+// Separate EventCard component to handle individual event visibility tracking
+interface EventCardProps {
+  event: Event;
+  index: number;
+  isFirstMount: boolean;
+  isEventNew: boolean;
+  onMarkAsSeen: () => void;
+  currentUserId: string;
+  eventActions: any;
+  activeFilter: string;
+}
+
+function EventCard({
+  event,
+  index,
+  isFirstMount,
+  isEventNew,
+  onMarkAsSeen,
+  currentUserId,
+  eventActions,
+  activeFilter,
+}: EventCardProps) {
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    eventId: string;
+    eventTitle: string;
+  } | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Track when event becomes visible and start 3-second timer
+  useEffect(() => {
+    if (!isEventNew || !cardRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            // Start 3-second timer when event is visible
+            timerRef.current = setTimeout(() => {
+              onMarkAsSeen();
+            }, 3000);
+          } else {
+            // Clear timer if event goes out of view
+            if (timerRef.current) {
+              clearTimeout(timerRef.current);
+              timerRef.current = null;
+            }
+          }
+        });
+      },
+      { threshold: 0.5 }, // Trigger when 50% of the card is visible
+    );
+
+    observer.observe(cardRef.current);
+
+    return () => {
+      observer.disconnect();
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, [isEventNew, onMarkAsSeen]);
+
+  // Mark as seen when any button is clicked
+  const handleCardClick = () => {
+    if (isEventNew) {
+      onMarkAsSeen();
+    }
+  };
+
+  return (
+    <>
+      <motion.div
+        ref={cardRef}
+        initial={isFirstMount ? { opacity: 0, x: -20 } : false}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: index * 0.05, duration: 0.4 }}
+        onClick={handleCardClick}
+      >
+        <Card className="bg-white/60 border-[#d4cfbe]/40 hover:shadow-lg transition-all overflow-hidden">
+          <div className="flex gap-3 p-3 md:p-4">
+            {/* Thumbnail */}
+            <div className="shrink-0">
+              <div
+                className="w-16 h-16 md:w-20 md:h-20 rounded-lg bg-cover bg-center border-2 border-[#e8e4d9]"
+                style={{
+                  backgroundImage: `url(${event.thumbnail})`,
+                }}
+              />
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <h3 className="text-[#8b8475] text-sm md:text-base line-clamp-1">
+                  {event.title}
+                </h3>
+                <div className="flex items-center gap-1 shrink-0">
+                  {isEventNew && (
+                    <Badge className="bg-red-500 text-white border-red-600 text-xs">
+                      NEW
+                    </Badge>
+                  )}
+                  {isFuture(event.startTime) && (
+                    <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">
+                      Upcoming
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              {/* Time */}
+              <div className="flex items-center gap-1 text-xs text-[#8b8475] mb-2">
+                <Clock className="h-3 w-3" />
+                <span>
+                  {format(event.startTime, "h:mm a")} -{" "}
+                  {format(event.endTime, "h:mm a")}
+                </span>
+                <span className="text-[#a8a195] ml-1">
+                  • {format(event.startTime, "MMM d, yyyy")}
+                </span>
+              </div>
+
+              {/* Countdown Timer - Only show for today's events */}
+              {activeFilter === "today" && isToday(event.startTime) && (
+                <div className="mb-2">
+                  <CountdownTimer
+                    startDate={event.startTime}
+                    endDate={event.endTime}
+                  />
+                </div>
+              )}
+
+              {/* AI Summary */}
+              <div className="flex items-start gap-1 mb-3">
+                <Sparkles className="h-3 w-3 text-[#8b8475] shrink-0 mt-0.5" />
+                <p className="text-xs text-[#a8a195] line-clamp-2">
+                  {event.aiSummary}
+                </p>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-between gap-2">
+                {/* Attendees */}
+                <div className="flex items-center -space-x-2">
+                  {event.attendees.slice(0, 4).map((attendee) => (
+                    <Avatar
+                      key={attendee.id}
+                      className="h-6 w-6 border-2 border-white"
+                    >
+                      <AvatarImage
+                        src={attendee.avatar}
+                        alt={attendee.name}
+                        className="object-cover"
+                      />
+                      <AvatarFallback className="bg-[#8b8475] text-white text-xs">
+                        {attendee.name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  ))}
+                  {event.attendees.length > 4 && (
+                    <div className="h-6 w-6 rounded-full bg-[#8b8475] border-2 border-white flex items-center justify-center text-xs text-white">
+                      +{event.attendees.length - 4}
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center gap-1">
+                  {/* Google Meet Link */}
+                  {event.meetLink && (
+                    <Button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(event.meetLink, "_blank");
+                      }}
+                      size="sm"
+                      variant="outline"
+                      className="bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-700 border-blue-200 h-7 px-2 text-xs"
+                    >
+                      <Video className="h-3 w-3 mr-1" />
+                      Join
+                    </Button>
+                  )}
+
+                  {/* Edit Button (only for own events) */}
+                  {event.createdBy === currentUserId && (
+                    <Button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        eventActions.openEditForm(event.id, {
+                          summary: event.title,
+                          description: event.aiSummary,
+                          start: event.startTime,
+                          end: event.endTime,
+                          location: event.location,
+                          attendees: event.attendees.map((a) => ({
+                            email: a.email,
+                            displayName: a.name,
+                          })),
+                          conferenceData: !!event.meetLink,
+                        });
+                      }}
+                      size="sm"
+                      variant="outline"
+                      className="bg-green-50 hover:bg-green-100 text-green-600 hover:text-green-700 border-green-200 h-7 px-2 text-xs"
+                      disabled={eventActions.isLoading}
+                    >
+                      <Edit className="h-3 w-3 mr-1" />
+                      Edit
+                    </Button>
+                  )}
+
+                  {/* Delete or Cancel Button */}
+                  {event.createdBy === currentUserId ? (
+                    <Button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteConfirm({
+                          eventId: event.id,
+                          eventTitle: event.title,
+                        });
+                      }}
+                      size="sm"
+                      variant="outline"
+                      className="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 border-red-200 h-7 px-2 text-xs"
+                      disabled={eventActions.isLoading}
+                    >
+                      <Trash2 className="h-3 w-3 mr-1" />
+                      Delete
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        eventActions.handleCancelAttendance(
+                          event.id,
+                          event.title,
+                        );
+                      }}
+                      size="sm"
+                      variant="outline"
+                      className="bg-orange-50 hover:bg-orange-100 text-orange-600 hover:text-orange-700 border-orange-200 h-7 px-2 text-xs"
+                      disabled={eventActions.isLoading}
+                    >
+                      <XCircle className="h-3 w-3 mr-1" />
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </motion.div>
+
+      {/* Delete Confirmation Dialog for this event */}
+      <AlertDialog
+        open={!!deleteConfirm}
+        onOpenChange={() => setDeleteConfirm(null)}
+      >
+        <AlertDialogContent className="bg-white border-[#d4cfbe]/40">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-[#8b8475]">
+              Delete Event?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-[#a8a195]">
+              Are you sure you want to delete "{deleteConfirm?.eventTitle}"?
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-[#d4cfbe]/40 text-[#8b8475] hover:bg-[#e8e4d9]/60">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteConfirm) {
+                  eventActions.handleDeleteEvent(
+                    deleteConfirm.eventId,
+                    deleteConfirm.eventTitle,
+                  );
+                  setDeleteConfirm(null);
+                }
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

@@ -12,22 +12,9 @@ export const useWeekData = (
   }>,
 ): DayAvailability[] => {
   return useMemo(() => {
-    console.log("=== [useWeekData] PROCESSING ===");
-    console.log("backendSlots:", backendSlots);
-    console.log("backendSlots.length:", backendSlots.length);
-
     if (backendSlots.length > 0) {
-      console.log("✅ Using REAL backend data (getDaysDataFromBackend)");
-      const result = getDaysDataFromBackend(
-        currentStartDate,
-        daysToShow,
-        backendSlots,
-      );
-      console.log("Result from getDaysDataFromBackend:", result);
-      return result;
+      return getDaysDataFromBackend(currentStartDate, daysToShow, backendSlots);
     }
-
-    console.log("⚠️ Using DUMMY data (getDaysData) - backendSlots is empty!");
     return getDaysData(currentStartDate, daysToShow);
   }, [currentStartDate, daysToShow, backendSlots]);
 };

@@ -1,4 +1,6 @@
 import { motion } from "motion/react";
+import { PageHelmet } from "../components/PageHelmet";
+import { Link } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { DemoSection } from "../components/DemoSection";
 import logo from "../public/logo.png";
@@ -18,6 +20,10 @@ export function LandingPage({ onLogin }: LandingPageProps) {
 
   return (
     <div className="flex-1 overflow-y-auto">
+      <PageHelmet
+        title="Weekaly - Your AI Personal Secretary for Calendar Management"
+        description="Not just a calendar, it's your AI personal secretary. Sync with Google Calendar, share availability, and coordinate meetings across time zones effortlessly."
+      />
       <div className="min-h-screen flex flex-col items-center px-4 py-8 md:py-16">
         <div className="w-full max-w-2xl mx-auto space-y-8 md:space-y-12">
           {/* Logo */}
@@ -156,6 +162,23 @@ export function LandingPage({ onLogin }: LandingPageProps) {
                 >
                   LinkedIn
                 </a>
+              </div>
+
+              {/* Legal Links */}
+              <div className="flex justify-center items-center gap-4 text-sm">
+                <Link
+                  to="/privacy"
+                  className="text-[#a8a195] hover:text-[#8b8475] transition-colors"
+                >
+                  Privacy Policy
+                </Link>
+                <span className="text-[#a8a195]">•</span>
+                <Link
+                  to="/terms"
+                  className="text-[#a8a195] hover:text-[#8b8475] transition-colors"
+                >
+                  Terms of Service
+                </Link>
               </div>
 
               {/* Made by ODOC.APP */}

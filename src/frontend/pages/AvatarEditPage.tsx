@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router-dom";
+import { PageHelmet } from "../components/PageHelmet";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Slider } from "../components/ui/slider";
@@ -53,6 +54,7 @@ export function AvatarEditPage({ imageSrc, onSave }: AvatarEditPageProps) {
       transition={{ duration: 0.6 }}
       className="flex-1 overflow-y-auto py-8 md:py-12 px-4 md:px-8"
     >
+      <PageHelmet title="Edit Avatar" />
       <div className="max-w-4xl mx-auto px-2 md:px-0">
         {/* Back Button */}
         <motion.div

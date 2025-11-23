@@ -159,6 +159,136 @@ function subtractEvents(
 }
 
 /**
+ * Find intersection of time blocks (times when ALL blocks overlap)
+ *
+ * @param blocksByUser - Array of time block arrays, one per user
+ * @returns Array of time blocks where all users are available
+ */
+function intersectTimeBlocks(blocksByUser: TimeBlock[][]): TimeBlock[] {
+  if (blocksByUser.length === 0) return [];
+  if (blocksByUser.length === 1) return blocksByUser[0];
+
+  // Start with first user's blocks
+  let result = blocksByUser[0];
+
+  // Intersect with each subsequent user's blocks
+  for (let i = 1; i < blocksByUser.length; i++) {
+    const newResult: TimeBlock[] = [];
+
+    for (const block1 of result) {
+      for (const block2 of blocksByUser[i]) {
+        // Find overlap between block1 and block2
+        const overlapStart = Math.max(
+          block1.start.getTime(),
+          block2.start.getTime(),
+        );
+        const overlapEnd = Math.min(block1.end.getTime(), block2.end.getTime());
+
+        // If there's an overlap, add it
+        if (overlapStart < overlapEnd) {
+          newResult.push({
+            start: new Date(overlapStart),
+            end: new Date(overlapEnd),
+          });
+        }
+      }
+    }
+
+    result = mergeTimeBlocks(newResult);
+  }
+
+  return result;
+}
+
+/**
+ * Calculate mutual availability for multiple users
+ *
+ * Takes all users' availabilities and events, returns only the time slots
+ * where ALL users are free (intersection of availabilities minus all events).
+ *
+ * @param currentUserAvailability - Current user's availability object
+ * @param otherUsersAvailabilities - Array of other users' availability objects
+ * @param currentUserEvents - Current user's events
+ * @param otherUsersEvents - Other users' events
+ * @param startTime - Start of time range (defaults to now)
+ * @param endTime - End of time range (defaults to 7 days from now)
+ * @returns Array of free time blocks where all users are available
+ */
+export function calculateMutualAvailability(
+  currentUserAvailability: any,
+  otherUsersAvailabilities: any[],
+  currentUserEvents: any[],
+  otherUsersEvents: any[],
+  startTime?: Date,
+  endTime?: Date,
+): Array<{ start: number; end: number; free: boolean }> {
+  if (!currentUserAvailability || otherUsersAvailabilities.length === 0) {
+    return [];
+  }
+
+  // Default time range: now to 7 days from now
+  const start =
+    startTime ||
+    (() => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      return d;
+    })();
+
+  const end =
+    endTime ||
+    (() => {
+      const d = new Date(start);
+      d.setDate(d.getDate() + 7);
+      return d;
+    })();
+
+  // Combine all availabilities
+  const allAvailabilities: Availability[] = [
+    {
+      id: currentUserAvailability.id,
+      owner: "current-user",
+      title: currentUserAvailability.name || currentUserAvailability.title,
+      description: "",
+      slots: currentUserAvailability.slots || [],
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      created_at: BigInt(0),
+      updated_at: BigInt(0),
+    },
+    ...otherUsersAvailabilities.map((avail: any) => ({
+      id: avail.id,
+      owner: avail.owner,
+      title: avail.title,
+      description: avail.description || "",
+      slots: avail.slots || [],
+      timezone:
+        avail.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      created_at: BigInt(avail.created_at || 0),
+      updated_at: BigInt(avail.updated_at || 0),
+    })),
+  ];
+
+  // Combine all events (current user + others)
+  const allEvents = [...currentUserEvents, ...otherUsersEvents];
+  const availabilityEvents: AvailabilityEvent[] = allEvents.map((e: any) => ({
+    startTime: new Date(
+      e.start?.dateTime || e.start?.date || e.startTime || new Date(),
+    ),
+    endTime: new Date(
+      e.end?.dateTime || e.end?.date || e.endTime || new Date(),
+    ),
+  }));
+
+  // Calculate mutual free time
+  return getAvailabilitySummary(
+    allAvailabilities,
+    availabilityEvents,
+    start,
+    end,
+  );
+}
+
+/**
  * Get availability summary for multiple users
  *
  * Combines multiple users' availabilities and events to produce a single
@@ -192,43 +322,46 @@ export function getAvailabilitySummary(
   startTime: Date,
   endTime: Date,
 ) {
-  // 1. Expand ALL availability slots to actual time blocks for the date range
-  const availabilityBlocks: TimeBlock[] = [];
+  // 1. Expand availability slots for EACH user separately
+  const availabilityBlocksByUser: TimeBlock[][] = [];
 
   // Iterate through each day in the range
   const currentDate = new Date(startTime);
-  currentDate.setHours(0, 0, 0, 0); // Start at beginning of day
+  currentDate.setHours(0, 0, 0, 0);
 
   const endDate = new Date(endTime);
-  endDate.setHours(23, 59, 59, 999); // End at end of day
+  endDate.setHours(23, 59, 59, 999);
 
-  while (currentDate <= endDate) {
-    // For EACH user's availability
-    for (const availability of availabilities) {
+  // For EACH user, collect their availability blocks
+  for (const availability of availabilities) {
+    const userBlocks: TimeBlock[] = [];
+    const dateIterator = new Date(currentDate);
+
+    while (dateIterator <= endDate) {
       for (const slot of availability.slots) {
-        const block = expandTimeSlotForDate(slot, currentDate);
+        const block = expandTimeSlotForDate(slot, dateIterator);
         if (block) {
           // Only include blocks that overlap with our time range
           if (block.end > startTime && block.start < endTime) {
-            // Trim block to fit within our time range
             const trimmedBlock = {
               start: new Date(
                 Math.max(block.start.getTime(), startTime.getTime()),
               ),
               end: new Date(Math.min(block.end.getTime(), endTime.getTime())),
             };
-            availabilityBlocks.push(trimmedBlock);
+            userBlocks.push(trimmedBlock);
           }
         }
       }
+      dateIterator.setDate(dateIterator.getDate() + 1);
     }
 
-    // Move to next day
-    currentDate.setDate(currentDate.getDate() + 1);
+    // Merge overlapping blocks for this user
+    availabilityBlocksByUser.push(mergeTimeBlocks(userBlocks));
   }
 
-  // 2. Merge ALL overlapping availability blocks (generic merge)
-  const mergedAvailability = mergeTimeBlocks(availabilityBlocks);
+  // 2. Find INTERSECTION of all users' availability (mutual free time)
+  const mutualAvailability = intersectTimeBlocks(availabilityBlocksByUser);
 
   // 3. Convert ALL events to time blocks
   const eventBlocks: TimeBlock[] = events
@@ -237,18 +370,16 @@ export function getAvailabilitySummary(
       end: new Date(event.endTime),
     }))
     .filter((block) => {
-      // Only include events that overlap with our time range
       return block.end > startTime && block.start < endTime;
     })
     .map((block) => ({
-      // Trim to fit within our time range
       start: new Date(Math.max(block.start.getTime(), startTime.getTime())),
       end: new Date(Math.min(block.end.getTime(), endTime.getTime())),
     }));
 
-  // 4. Subtract ALL events from combined availability
-  const statusBlocks = subtractEvents(mergedAvailability, eventBlocks);
+  // 4. Subtract ALL events from mutual availability
+  const statusBlocks = subtractEvents(mutualAvailability, eventBlocks);
 
-  // 5. Return combined free/busy blocks
-  return statusBlocks;
+  // 5. Return only FREE blocks (filter out busy times)
+  return statusBlocks.filter((block) => block.free);
 }

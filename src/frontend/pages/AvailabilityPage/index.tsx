@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { PageHelmet } from "@/components/PageHelmet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -456,6 +457,14 @@ export const AvailabilityPage = memo(function AvailabilityPage(
       })()
     : false;
 
+  // Determine the page title based on whether viewing own or someone else's availability
+  const pageTitle = useMemo(() => {
+    if (isViewingOthers && ownerName) {
+      return `${ownerName}'s Availability`;
+    }
+    return availabilityName;
+  }, [isViewingOthers, ownerName, availabilityName]);
+
   return (
     <motion.div
       initial={isFirstMount.current ? { opacity: 0, y: 20 } : false}
@@ -468,6 +477,7 @@ export const AvailabilityPage = memo(function AvailabilityPage(
         }
       }}
     >
+      <PageHelmet title={pageTitle} />
       <div
         className="max-w-6xl mx-auto"
         onClick={(e) => {

@@ -25,10 +25,22 @@ function AvatarImage({
   className,
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Image>) {
+  const handleLoadingStatusChange = React.useCallback(
+    (status: "idle" | "loading" | "loaded" | "error") => {
+      if (status === "error") {
+        console.error("❌ [Avatar] Failed to load image:", props.src);
+      } else if (status === "loaded") {
+        console.log("✅ [Avatar] Successfully loaded image:", props.src);
+      }
+    },
+    [props.src],
+  );
+
   return (
     <AvatarPrimitive.Image
       data-slot="avatar-image"
       className={cn("aspect-square size-full", className)}
+      onLoadingStatusChange={handleLoadingStatusChange}
       {...props}
     />
   );

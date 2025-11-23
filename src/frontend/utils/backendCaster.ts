@@ -193,12 +193,13 @@ export function createBackendCaster(actor: any): ActorSubclass<_SERVICE> {
         return async () => {
           const availabilities = await targetAny.list_user_availabilities();
 
-          return availabilities.map((avail: any) =>
-            convertBigIntToNumber({
-              ...avail,
-              slots: deserializeTimeSlots(avail.slots),
-            }),
-          );
+          return availabilities.map((avail: any) => {
+            const converted = convertBigIntToNumber(avail);
+            if (converted.slots) {
+              converted.slots = deserializeTimeSlots(converted.slots);
+            }
+            return converted;
+          });
         };
       }
 
@@ -208,12 +209,13 @@ export function createBackendCaster(actor: any): ActorSubclass<_SERVICE> {
           const availabilities =
             await targetAny.search_availabilities_by_email(email);
 
-          return availabilities.map((avail: any) =>
-            convertBigIntToNumber({
-              ...avail,
-              slots: deserializeTimeSlots(avail.slots),
-            }),
-          );
+          return availabilities.map((avail: any) => {
+            const converted = convertBigIntToNumber(avail);
+            if (converted.slots) {
+              converted.slots = deserializeTimeSlots(converted.slots);
+            }
+            return converted;
+          });
         };
       }
 
@@ -223,12 +225,13 @@ export function createBackendCaster(actor: any): ActorSubclass<_SERVICE> {
           const availabilities =
             await targetAny.search_availabilities_by_username(username);
 
-          return availabilities.map((avail: any) =>
-            convertBigIntToNumber({
-              ...avail,
-              slots: deserializeTimeSlots(avail.slots),
-            }),
-          );
+          return availabilities.map((avail: any) => {
+            const converted = convertBigIntToNumber(avail);
+            if (converted.slots) {
+              converted.slots = deserializeTimeSlots(converted.slots);
+            }
+            return converted;
+          });
         };
       }
 
@@ -238,12 +241,13 @@ export function createBackendCaster(actor: any): ActorSubclass<_SERVICE> {
           const availabilities =
             await targetAny.search_availabilities_by_principal(principal);
 
-          return availabilities.map((avail: any) =>
-            convertBigIntToNumber({
-              ...avail,
-              slots: deserializeTimeSlots(avail.slots),
-            }),
-          );
+          return availabilities.map((avail: any) => {
+            const converted = convertBigIntToNumber(avail);
+            if (converted.slots) {
+              converted.slots = deserializeTimeSlots(converted.slots);
+            }
+            return converted;
+          });
         };
       }
 
@@ -253,12 +257,17 @@ export function createBackendCaster(actor: any): ActorSubclass<_SERVICE> {
           const results = await targetAny.search_by_emails(emails);
 
           return results.map((availabilities: any[]) =>
-            availabilities.map((avail: any) =>
-              convertBigIntToNumber({
-                ...avail,
-                slots: deserializeTimeSlots(avail.slots),
-              }),
-            ),
+            availabilities.map((avail: any) => {
+              // Convert the entire availability object (includes busy_times)
+              const converted = convertBigIntToNumber(avail);
+
+              // Also deserialize slots
+              if (converted.slots) {
+                converted.slots = deserializeTimeSlots(converted.slots);
+              }
+
+              return converted;
+            }),
           );
         };
       }
@@ -269,12 +278,13 @@ export function createBackendCaster(actor: any): ActorSubclass<_SERVICE> {
           const results = await targetAny.search_by_usernames(usernames);
 
           return results.map((availabilities: any[]) =>
-            availabilities.map((avail: any) =>
-              convertBigIntToNumber({
-                ...avail,
-                slots: deserializeTimeSlots(avail.slots),
-              }),
-            ),
+            availabilities.map((avail: any) => {
+              const converted = convertBigIntToNumber(avail);
+              if (converted.slots) {
+                converted.slots = deserializeTimeSlots(converted.slots);
+              }
+              return converted;
+            }),
           );
         };
       }

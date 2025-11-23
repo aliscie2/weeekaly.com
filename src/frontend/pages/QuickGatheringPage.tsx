@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router-dom";
+import { PageHelmet } from "../components/PageHelmet";
 import { Button } from "../components/ui/button";
 import { ArrowLeft, Users, Clock, MapPin, Check, Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
@@ -50,6 +51,7 @@ export function QuickGatheringPage({ contacts }: QuickGatheringPageProps) {
       transition={{ duration: 0.6 }}
       className="flex-1 overflow-y-auto py-4 md:py-8 px-4 md:px-8"
     >
+      <PageHelmet title="Quick Gathering" />
       <div className="max-w-4xl mx-auto">
         {/* Back Button */}
         <motion.div

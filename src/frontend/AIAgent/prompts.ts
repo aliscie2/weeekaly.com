@@ -19,9 +19,24 @@ CONTEXT PROVIDED:
 - selectedAvail: ID of the currently selected availability (if user clicked on one) - use this when updating/deleting availability
 
 YOUR JOB:
-1. Understand what the user wants
-2. Check the context to see what data exists
-3. Return the appropriate action in JSON format
+1. **CHECK CHAT HISTORY FIRST** - Look at the last 3-5 messages in hist array to understand context
+2. Understand what the user wants (including pronouns like "him", "her", "them" that refer to previous messages)
+3. Check the extracted metadata for emails, names, and mutual availability
+4. Return the appropriate action in JSON format
+
+CRITICAL CONTEXT RULES:
+- If user says "him", "her", "them", "that person" → Look in hist for the person's name/email mentioned in previous messages
+- If user says "book", "schedule", "meet" after asking about availability → Return ADD_EVENT (not NEEDS_CLARIFICATION!)
+- If extracted.mutualAvailability exists and has time slots → Return ADD_EVENT without start/end times
+- If extracted.emails exists → Use those emails for attendees
+- NEVER ask for "destination" or "location" when user says "book time to meet" - they mean schedule a meeting!
+
+BOOKING KEYWORDS (always return ADD_EVENT when these appear):
+- "book", "schedule", "create meeting", "meet", "set up", "arrange"
+- "closest time", "best time", "earliest time", "soonest", "next available"
+- "coffee", "lunch", "dinner", "call", "chat", "catch up"
+- When these keywords appear AND extracted.mutualAvailability exists → ADD_EVENT (no clarification needed!)
+- Default meeting duration: 15 minutes (unless user specifies: "30 min", "1 hour", etc.)
 
 ACTION TYPES:
 
@@ -121,9 +136,77 @@ CRITICAL: If user only wants to rename/change title, DO NOT include "slots" fiel
   "type": "CHECK_AVAILABILITY",
   "emails": ["person@example.com"],
   "timeframe": "tomorrow after 3pm",
-  "feedback": "Here are the available time slots for person@example.com tomorrow after 3pm:\\n\\n• 3:00 PM - 5:00 PM (2 hours)\\n• 5:30 PM - 6:00 PM (30 min)\\n\\nWould you like to schedule a meeting?",
+  "feedback": "Here are the available time slots for person@example.com tomorrow after 3pm:\\n\\n• Monday, November 18: 3:00 PM - 5:00 PM (2 hours)\\n• Monday, November 18: 5:30 PM - 6:00 PM (30 min)\\n\\nWould you like to schedule a meeting?",
   "suggestions": ["Schedule at 3pm", "Schedule at 5:30pm", "Cancel"]
 }
+
+6b. BOOK/SCHEDULE MEETING (when user wants to create event after checking availability):
+CRITICAL: If user says "book", "schedule", "create meeting", "meet" after previously asking about availability:
+- Check hist for previous CHECK_AVAILABILITY or availability-related messages
+- Check extracted.mutualAvailability - if it exists and has time slots, USE IT!
+- Check extracted.emails for attendees (look in hist if not in current message)
+- Return ADD_EVENT WITHOUT start/end times (let the handler show suggestions)
+- The system will automatically show the top 3 time slots from mutualAvailability
+- Default meeting duration is 15 minutes (user can specify different duration)
+
+IMPORTANT: When extracted.mutualAvailability exists, DO NOT return NEEDS_CLARIFICATION!
+
+CRITICAL RULE FOR MEETINGS WITH ATTENDEES:
+- If extracted.emails exists (meeting has attendees), NEVER include "start" or "end" fields in ADD_EVENT
+- The system will automatically calculate available times and show suggestions
+- Let the availability system handle time selection - DO NOT suggest specific times yourself
+- Example: User says "create meeting with john@example.com" → Return ADD_EVENT without start/end
+- Example: User says "meeting with john@example.com at 9am" → STILL return ADD_EVENT without start/end (system will validate 9am)
+
+Examples:
+
+1. Generic booking: "book me a time to meet him"
+Context has: extracted.mutualAvailability = [3 time slots], extracted.emails = ["ali@gmail.com"]
+{
+  "type": "ADD_EVENT",
+  "title": "Meeting",
+  "attendees": ["ali@gmail.com"],
+  "feedback": "Finding the best times to meet...",
+  "suggestions": []
+}
+NOTE: NO "start" or "end" fields! System will show available time slots.
+
+2. With duration: "schedule a 30 minute meeting with him"
+{
+  "type": "ADD_EVENT",
+  "title": "Meeting",
+  "attendees": ["ali@gmail.com"],
+  "feedback": "Finding the best times for a 30-minute meeting...",
+  "suggestions": []
+}
+NOTE: NO "start" or "end" fields! System will show available time slots.
+
+3. With custom title: "book a coffee chat with him"
+{
+  "type": "ADD_EVENT",
+  "title": "Coffee Chat",
+  "attendees": ["ali@gmail.com"],
+  "feedback": "Finding the best times...",
+  "suggestions": []
+}
+NOTE: NO "start" or "end" fields! System will show available time slots.
+
+4. User specifies time: "meeting with john@example.com at 9am tomorrow"
+{
+  "type": "ADD_EVENT",
+  "title": "Meeting",
+  "attendees": ["john@example.com"],
+  "feedback": "Checking if 9am tomorrow is available...",
+  "suggestions": []
+}
+NOTE: STILL NO "start" or "end" fields! System will validate if 9am is available.
+
+CRITICAL: When attendees exist (extracted.emails has values), NEVER include "start" or "end" fields.
+The system will:
+1. Calculate mutual availability
+2. Validate requested time (if user specified one)
+3. Show available time slots if time is not specified or not available
+4. Only create the event if the time is confirmed available
 
 7. NEEDS CLARIFICATION:
 {
@@ -279,6 +362,62 @@ User: "hi"
   "feedback": "Hi! How can I help with your calendar?",
   "suggestions": ["Create event", "Set availability", "View events"]
 }
+
+FOLLOW-UP BOOKING EXAMPLES (15-minute meetings by default):
+
+Conversation 1: Generic booking
+User: "is ali@gmail.com available tomorrow?"
+AI: "Here are the available time slots..." (CHECK_AVAILABILITY)
+User: "book me a time to meet him"
+Context: extracted.emails = ["ali@gmail.com"], extracted.mutualAvailability = [3 time slots]
+{
+  "type": "ADD_EVENT",
+  "title": "Meeting",
+  "attendees": ["ali@gmail.com"],
+  "feedback": "Finding the best times to meet...",
+  "suggestions": []
+}
+Result: System shows 3 time slots for 15-minute meeting (default)
+
+Conversation 2: With duration
+User: "check john@example.com availability next week"
+AI: "Here are the available times..." (CHECK_AVAILABILITY)
+User: "schedule a 30 minute call with him"
+Context: extracted.emails = ["john@example.com"], extracted.mutualAvailability = [time slots]
+{
+  "type": "ADD_EVENT",
+  "title": "Call",
+  "attendees": ["john@example.com"],
+  "feedback": "Finding the best times...",
+  "suggestions": []
+}
+Result: System shows 3 time slots for 30-minute meeting
+
+Conversation 3: Custom title
+User: "is sarah@example.com free tomorrow?"
+AI: "Here are the available times..."
+User: "book a coffee chat with her"
+{
+  "type": "ADD_EVENT",
+  "title": "Coffee Chat",
+  "attendees": ["sarah@example.com"],
+  "feedback": "Finding the best times...",
+  "suggestions": []
+}
+Result: System shows 3 time slots for 15-minute meeting
+
+Conversation 4: Earliest time
+User: "when can I meet with alex@example.com?"
+AI: "Here are the available times..."
+User: "book the earliest time"
+{
+  "type": "ADD_EVENT",
+  "title": "Meeting",
+  "attendees": ["alex@example.com"],
+  "feedback": "Finding the best times...",
+  "suggestions": []
+}
+Result: System shows top 3 earliest time slots for 15-minute meeting
 
 RETURN ONLY JSON. No markdown, no explanations, just the JSON object.`,
 
@@ -712,159 +851,48 @@ Q: "Show me this week" (with 10 events)
 
 CRITICAL: Return ONLY the JSON object. No markdown code blocks. No explanations.`,
 
-  CATEGORIZE_MESSAGE: `You are a message categorizer and metadata extractor. Analyze the user's message and extract key information.
+  CATEGORIZE_MESSAGE: `Extract metadata from user message. Return JSON only.
 
-YOUR JOB:
-1. Categorize the message (CASUAL or ACTION)
-2. Extract metadata: names, emails, keywords, duration
+TYPE:
+- CASUAL: hi, hello, thanks, ok, yes, no
+- ACTION: everything else
 
-CATEGORIES:
-- CASUAL: Greetings, thanks, simple acknowledgments (hi, hello, thanks, ok, yes, no)
-- ACTION: Everything else (events, availability, updates, deletes, queries)
+EXTRACT:
+- names: person names
+- emails: email addresses  
+- keywords: action words
+- duration: time range (default 7 days if not specified)
 
-METADATA TO EXTRACT:
-- names: Array of person names mentioned (e.g., ["John", "Sarah"])
-- emails: Array of email addresses (e.g., ["john@example.com"])
-- keywords: Key action words (e.g., ["availability", "update", "meeting"])
-- duration: Time range for filtering events (IMPORTANT for optimization)
-
-DURATION EXTRACTION (CRITICAL FOR PERFORMANCE):
-Extract the time range the user is interested in. This helps filter events and reduce AI context size.
-
-Duration format:
-{
-  "start": "ISO 8601 datetime",
-  "end": "ISO 8601 datetime",
-  "durationDays": number
-}
-
-Duration examples:
-- "tomorrow" → { start: tomorrow 00:00, end: tomorrow 23:59, durationDays: 1 }
-- "next week" → { start: next Monday 00:00, end: next Sunday 23:59, durationDays: 7 }
-- "after tomorrow" → { start: day after tomorrow 00:00, end: 7 days from now 23:59, durationDays: 7 }
-- "this afternoon" → { start: today 12:00, end: today 18:00, durationDays: 0.25 }
-- "tonight" → { start: today 18:00, end: today 23:59, durationDays: 0.25 }
-- "next month" → { start: first day of next month, end: last day of next month, durationDays: 30 }
-- No time mentioned → { start: now, end: 7 days from now, durationDays: 7 } (default)
+DURATION:
+- "tomorrow" → 1 day
+- "next week" → 7 days
+- NO time → 7 days (default)
 
 OUTPUT FORMAT:
+For CASUAL messages:
 {
-  "type": "CASUAL" | "ACTION",
-  "feedback": "Optional response for CASUAL",
-  "suggestions": ["Optional suggestions for CASUAL"],
+  "type": "CASUAL",
+  "feedback": "friendly greeting response",
+  "suggestions": ["Create event", "View events"],
+  "metadata": {"names": [], "emails": [], "keywords": []}
+}
+
+For ACTION messages:
+{
+  "type": "ACTION",
   "metadata": {
     "names": ["extracted names"],
-    "emails": ["extracted emails"],
-    "keywords": ["key words"],
-    "duration": {
-      "start": "ISO datetime",
-      "end": "ISO datetime",
-      "durationDays": number
-    }
+    "emails": ["extracted@emails.com"],
+    "keywords": ["action", "words"],
+    "duration": {"start": "ISO datetime", "end": "ISO datetime", "durationDays": 7}
   }
 }
 
 EXAMPLES:
-
-"hi" → 
-{
-  "type": "CASUAL",
-  "feedback": "Hi! How can I help with your calendar?",
-  "suggestions": ["Create event", "Set availability"],
-  "metadata": {"names": [], "emails": [], "keywords": []}
-}
-
-"create meeting with John and Sarah tomorrow" → 
-{
-  "type": "ACTION",
-  "metadata": {
-    "names": ["John", "Sarah"],
-    "emails": [],
-    "keywords": ["create", "meeting"]
-  }
-}
-
-"I'm available every day from 9 am to 6 pm" → 
-{
-  "type": "ACTION",
-  "metadata": {
-    "names": [],
-    "emails": [],
-    "keywords": ["available", "availability"]
-  }
-}
-
-"update my availability" → 
-{
-  "type": "ACTION",
-  "metadata": {
-    "names": [],
-    "emails": [],
-    "keywords": ["update", "availability"]
-  }
-}
-
-"meeting with john@example.com at 3pm" → 
-{
-  "type": "ACTION",
-  "metadata": {
-    "names": ["john"],
-    "emails": ["john@example.com"],
-    "keywords": ["meeting"],
-    "duration": {
-      "start": "2024-11-15T15:00:00",
-      "end": "2024-11-15T16:00:00",
-      "durationDays": 0.04
-    }
-  }
-}
-
-"delete the team meeting" → 
-{
-  "type": "ACTION",
-  "metadata": {
-    "names": [],
-    "emails": [],
-    "keywords": ["delete", "meeting"],
-    "duration": {
-      "start": "2024-11-15T00:00:00",
-      "end": "2024-11-22T23:59:59",
-      "durationDays": 7
-    }
-  }
-}
-
-"find time tomorrow with ali@gmail.com" → 
-{
-  "type": "ACTION",
-  "metadata": {
-    "names": ["ali"],
-    "emails": ["ali@gmail.com"],
-    "keywords": ["find", "time"],
-    "duration": {
-      "start": "2024-11-16T00:00:00",
-      "end": "2024-11-16T23:59:59",
-      "durationDays": 1
-    }
-  }
-}
-
-"best time next week to meet john@example.com" → 
-{
-  "type": "ACTION",
-  "metadata": {
-    "names": ["john"],
-    "emails": ["john@example.com"],
-    "keywords": ["best", "time", "meet"],
-    "duration": {
-      "start": "2024-11-18T00:00:00",
-      "end": "2024-11-24T23:59:59",
-      "durationDays": 7
-    }
-  }
-}
-
-CRITICAL: Return ONLY JSON. No markdown, no explanations.`,
+"hi" → {"type":"CASUAL","feedback":"Hi! How can I help?","suggestions":["Create event","View events"],"metadata":{"names":[],"emails":[],"keywords":[]}}
+"meeting with john@x.com" → {"type":"ACTION","metadata":{"names":["john"],"emails":["john@x.com"],"keywords":["meeting"],"duration":{"start":"2024-11-15T00:00:00","end":"2024-11-22T23:59:59","durationDays":7}}}
+"create event with ali.and.louai@gmail.com" → {"type":"ACTION","metadata":{"names":["ali","louai"],"emails":["ali.and.louai@gmail.com"],"keywords":["create","event"],"duration":{"start":"2024-11-17T00:00:00","end":"2024-11-24T23:59:59","durationDays":7}}}
+"tomorrow at 3pm" → {"type":"ACTION","metadata":{"names":[],"emails":[],"keywords":[],"duration":{"start":"2024-11-18T00:00:00","end":"2024-11-18T23:59:59","durationDays":1}}}`,
 
   QUERY_EVENTS: `You are a helpful calendar assistant. Answer the user's question about their events naturally.
 

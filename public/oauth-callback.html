@@ -86,6 +86,26 @@
           );
           setTimeout(() => window.close(), 100);
         } else if (id_token || finalCode) {
+          // Debug: Log the ID token payload
+          if (id_token) {
+            try {
+              const parts = id_token.split(".");
+              if (parts.length === 3) {
+                const payload = JSON.parse(
+                  atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")),
+                );
+                console.log("🔍 [OAuth Callback] ID Token Payload:", {
+                  email: payload.email,
+                  name: payload.name,
+                  picture: payload.picture,
+                  sub: payload.sub,
+                });
+              }
+            } catch (e) {
+              console.error("❌ [OAuth Callback] Failed to parse ID token:", e);
+            }
+          }
+
           // Hybrid flow - send both id_token and code if available
           window.opener.postMessage(
             {

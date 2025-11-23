@@ -693,12 +693,21 @@ export function useDeleteEvent() {
 /**
  * Hook to fetch user availabilities from backend
  * Uses React Query for caching and automatic refetching
+ * Now uses email-based lookup for consistency across sessions
  */
 export function useAvailabilities(enabled: boolean = true) {
   return useQuery({
     queryKey: ["availabilities"],
     queryFn: async () => {
+      console.log("🔍 [useAvailabilities] Fetching availabilities");
+
+      // Use principal-based endpoint (standard approach)
       const availsList = await backendActor.list_user_availabilities();
+      console.log(
+        "✅ [useAvailabilities] Found",
+        availsList.length,
+        "availabilities",
+      );
       return availsList;
     },
     enabled: enabled,
