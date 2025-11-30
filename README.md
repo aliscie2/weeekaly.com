@@ -1,6 +1,8 @@
 # Weekaly
 
 Calendar and scheduling application on the Internet Computer with Google Calendar integration.
+<img width="1210" height="828" alt="Screenshot 2025-11-30 at 9 51 44 AM" src="https://github.com/user-attachments/assets/da53bd23-3e75-4bb3-bf67-379863ce1515" />
+
 
 ## Quick Start
 
