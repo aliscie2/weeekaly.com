@@ -1,5 +1,5 @@
-import { Identity, ActorSubclass } from "@dfinity/agent";
-import { Ed25519KeyIdentity } from "@dfinity/identity";
+import { Identity, ActorSubclass, DerEncodedPublicKey, Signature } from "@dfinity/agent";
+import { Ed25519KeyIdentity, DelegationIdentity, DelegationChain, Delegation } from "@dfinity/identity";
 import { AUTH_CONSTANTS, AUTH_ERRORS } from "./authConstants";
 import type { _SERVICE } from "../../declarations/backend/backend.did.d.ts";
 
@@ -291,9 +291,44 @@ export async function loginWithOAuth(
       throw new Error(delegationResult.Err);
     }
 
-    // 10. Use session key directly as identity
-    // TODO: Implement proper delegation chain with threshold ECDSA signing
-    const identity = sessionKey;
+    // 10. Build DelegationIdentity from the delegation chain
+    // The principal will be derived from user_canister_pubkey (deterministic per user)
+    const { signed_delegation, user_canister_pubkey } = delegationResult.Ok;
+    
+    // Convert backend response to proper types for @dfinity/identity
+    const pubkeyBuffer = new Uint8Array(signed_delegation.delegation.pubkey).buffer as ArrayBuffer;
+    const signatureBuffer = new Uint8Array(signed_delegation.signature).buffer as ArrayBuffer;
+    const userPubkeyBuffer = new Uint8Array(user_canister_pubkey).buffer as ArrayBuffer;
+    
+    // Get targets - convert optional array to Principal array or undefined
+    const targets = signed_delegation.delegation.targets?.[0];
+    
+    // Create a Delegation object from the backend response
+    const delegation = new Delegation(
+      pubkeyBuffer,
+      signed_delegation.delegation.expiration,
+      targets,
+    );
+    
+    // Create the delegation chain with the user's deterministic public key as the root
+    // This pubkey determines the principal that identity.getPrincipal() returns
+    const delegationChain = DelegationChain.fromDelegations(
+      [
+        {
+          delegation,
+          signature: signatureBuffer as Signature,
+        },
+      ],
+      userPubkeyBuffer as DerEncodedPublicKey,
+    );
+    
+    // Create DelegationIdentity: sessionKey signs requests, but principal comes from delegationChain root
+    const identity = DelegationIdentity.fromDelegation(sessionKey, delegationChain);
+    
+    // Log the principals to verify they match
+    console.log("🔑 [OAuth] Session key principal:", sessionKey.getPrincipal().toText());
+    console.log("🔑 [OAuth] Delegation identity principal:", identity.getPrincipal().toText());
+    console.log("🔑 [OAuth] User canister pubkey (hex):", Array.from(user_canister_pubkey).map(b => b.toString(16).padStart(2, '0')).join(''));
 
     onSuccess?.();
     return { identity, sessionKey };
